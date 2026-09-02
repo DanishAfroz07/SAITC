@@ -1,6 +1,7 @@
 # --- Web API ---
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
+python-multipart==0.0.20   # required by FastAPI/Starlette to parse file uploads (POST /documents/upload)
 
 # --- Config / validation ---
 pydantic==2.13.5

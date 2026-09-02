@@ -1,17 +1,36 @@
-"""Persistent Chroma-backed store for embedded document chunks.
-
-Metadata (document_id, version, effective_date, supersedes, classification,
-section, is_table) travels with every chunk into Chroma, so it survives the
-round trip back out at query time - the corpus README is explicit that
-metadata must "reach your retrieval layer", and this is where that happens.
+"""Embeds chunk text via Ollama and stores/queries it in a persistent Chroma
+collection. Every chunk's metadata travels with it into Chroma so it comes
+back out at query time.
 """
 from datetime import date
 from pathlib import Path
+from typing import Protocol
 
 import chromadb
+import ollama
 
 from app.models import Chunk, DocumentMetadata, RetrievedChunk
-from app.retrieval.embeddings import Embedder
+
+
+class Embedder(Protocol):
+    """Anything that can turn text into vectors - lets ChromaVectorStore
+    depend on this instead of on Ollama specifically."""
+
+    def embed(self, texts: list[str]) -> list[list[float]]: ...
+    def embed_one(self, text: str) -> list[float]: ...
+
+
+class OllamaEmbedder:
+    def __init__(self, model: str, host: str) -> None:
+        self._client = ollama.Client(host=host)
+        self._model = model
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed_one(text) for text in texts]
+
+    def embed_one(self, text: str) -> list[float]:
+        response = self._client.embeddings(model=self._model, prompt=text)
+        return response["embedding"]
 
 
 class ChromaVectorStore:
@@ -24,8 +43,8 @@ class ChromaVectorStore:
         self._embedder = embedder
 
     def reset(self) -> None:
-        """Drops and recreates the collection - ingestion always starts clean
-        so re-running it never leaves stale chunks behind."""
+        """Drops and recreates the collection, so a full ingest never leaves
+        stale chunks behind."""
         self._client.delete_collection(self._collection_name)
         self._collection = self._client.get_or_create_collection(
             name=self._collection_name, metadata={"hnsw:space": "cosine"}
@@ -41,6 +60,11 @@ class ChromaVectorStore:
             documents=[c.text for c in chunks],
             metadatas=[self._to_metadata_dict(c) for c in chunks],
         )
+
+    def delete_by_document_id(self, document_id: str) -> None:
+        """Removes every chunk for one document - used when re-uploading or
+        deleting a document, so its old chunks don't linger."""
+        self._collection.delete(where={"document_id": document_id})
 
     def query(self, query_text: str, top_k: int) -> list[RetrievedChunk]:
         query_embedding = self._embedder.embed_one(query_text)
@@ -93,7 +117,6 @@ class ChromaVectorStore:
                 is_table=meta["is_table"],
                 metadata=metadata,
             )
-            # Chroma's cosine "distance" is (1 - cosine similarity); invert it
-            # back to a similarity score so thresholds elsewhere read naturally.
+            # Chroma's cosine "distance" is (1 - similarity); invert it back.
             retrieved.append(RetrievedChunk(chunk=chunk, score=1.0 - distance))
         return retrieved

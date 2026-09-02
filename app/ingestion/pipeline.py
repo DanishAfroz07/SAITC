@@ -1,6 +1,6 @@
-"""Orchestrates one ingestion run: load manifest -> extract -> chunk -> embed
--> store. This is the only place that sequences those steps; each step's own
-module knows nothing about the others.
+"""Orchestrates ingestion: load manifest -> extract -> chunk -> embed ->
+store. run() does the full corpus (wipes and rebuilds); run_single() ingests
+one document (used by the upload endpoint) without touching the rest.
 """
 import logging
 import time
@@ -10,6 +10,7 @@ from pathlib import Path
 from app.ingestion.chunker import SectionChunker
 from app.ingestion.loader import iter_pdf_files, load_manifest
 from app.ingestion.parser import cross_check_metadata, extract_text
+from app.models import DocumentMetadata
 from app.retrieval.vector_store import ChromaVectorStore
 
 logger = logging.getLogger(__name__)
@@ -51,15 +52,10 @@ class IngestionPipeline:
                 logger.warning("Skipping %s: not present in manifest.", pdf_path.name)
                 continue
 
-            text = extract_text(pdf_path)
-            cross_check_metadata(text, metadata)
-
-            chunks = self._chunker.chunk(text, metadata)
-            self._vector_store.add_chunks(chunks)
-
+            num_chunks, num_tables = self._ingest_file(pdf_path, metadata)
             documents_processed += 1
-            chunks_created += len(chunks)
-            table_chunks += sum(1 for c in chunks if c.is_table)
+            chunks_created += num_chunks
+            table_chunks += num_tables
 
         report = IngestionReport(
             documents_processed=documents_processed,
@@ -75,3 +71,33 @@ class IngestionPipeline:
             report.elapsed_seconds,
         )
         return report
+
+    def run_single(self, pdf_path: Path, metadata: DocumentMetadata) -> IngestionReport:
+        """Ingests one document; replaces its existing chunks, if any."""
+        start = time.perf_counter()
+        self._vector_store.delete_by_document_id(metadata.document_id)
+        num_chunks, num_tables = self._ingest_file(pdf_path, metadata)
+        report = IngestionReport(
+            documents_processed=1,
+            chunks_created=num_chunks,
+            table_chunks=num_tables,
+            elapsed_seconds=time.perf_counter() - start,
+        )
+        logger.info(
+            "Ingested %s (%s) into %d chunks (%d table chunks) in %.2fs",
+            metadata.document_id,
+            pdf_path.name,
+            report.chunks_created,
+            report.table_chunks,
+            report.elapsed_seconds,
+        )
+        return report
+
+    def _ingest_file(self, pdf_path: Path, metadata: DocumentMetadata) -> tuple[int, int]:
+        text = extract_text(pdf_path)
+        cross_check_metadata(text, metadata)
+
+        chunks = self._chunker.chunk(text, metadata)
+        self._vector_store.add_chunks(chunks)
+
+        return len(chunks), sum(1 for c in chunks if c.is_table)

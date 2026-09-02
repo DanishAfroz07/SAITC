@@ -24,10 +24,16 @@ class Settings(BaseSettings):
     ollama_llm_model: str = "llama3.2:3b"
     ollama_embed_model: str = "nomic-embed-text"
 
-    top_k: int = 6
+    top_k: int = 8
     similarity_threshold: float = 0.35
     ambiguity_margin: float = 0.05
     chunk_max_chars: int = 1200
+
+    # Reranking: retrieve top_k broadly by embedding similarity, then rerank
+    # and (for the sufficient-evidence case only) narrow to rerank_top_n
+    # before generation - see app/rag_pipeline.py.
+    rerank_enabled: bool = True
+    rerank_top_n: int = 4
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000

@@ -27,11 +27,8 @@ def extract_text(pdf_path: Path) -> str:
 
 
 def cross_check_metadata(text: str, manifest_entry: DocumentMetadata) -> None:
-    """Logs a warning if the in-PDF header block disagrees with the manifest.
-
-    The manifest always wins (see loader.load_manifest) - this exists only to
-    surface authoring mistakes during ingestion, not to change behaviour.
-    """
+    """Logs a warning if the PDF's header block disagrees with the
+    manifest. The manifest always wins - this only flags mismatches."""
     match = _HEADER_PATTERN.search(text)
     if not match:
         logger.warning(

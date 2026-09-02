@@ -1,7 +1,5 @@
-"""Pydantic request/response contracts for the HTTP API. Kept separate from
-app.models on purpose: this is the API's own boundary and can change shape
-(versioning, renamed fields) independently of the internal domain model.
-"""
+"""Pydantic request/response models for the HTTP API (separate from the
+internal domain models in app.models)."""
 from datetime import date
 
 from pydantic import BaseModel
@@ -28,6 +26,31 @@ class IngestResponse(BaseModel):
     chunks_created: int
     table_chunks: int
     elapsed_seconds: float
+
+
+class DocumentUploadResponse(BaseModel):
+    document_id: str
+    file_name: str
+    chunks_created: int
+    table_chunks: int
+    elapsed_seconds: float
+    replaced_previous: bool
+
+
+class DocumentSummary(BaseModel):
+    document_id: str
+    title: str
+    version: str
+    effective_date: date
+    owner: str
+    classification: str
+    supersedes: str | None
+    file_name: str
+
+
+class DocumentDeleteResponse(BaseModel):
+    document_id: str
+    deleted: bool
 
 
 class HealthResponse(BaseModel):

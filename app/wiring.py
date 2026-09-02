@@ -1,22 +1,21 @@
-"""Composition root: the one place that knows how to build concrete objects
-from Settings and wire them together. main.py and api/routes.py both call
-into here and never construct a concrete class themselves - that's what
-keeps them free to depend only on interfaces (RagPipeline, IngestionPipeline).
+"""Composition root: builds concrete objects from Settings and wires them
+together. The API controllers and the CLI depend only on RagPipeline /
+IngestionPipeline, never on a concrete class - this is the one place that
+constructs them.
 """
 from functools import lru_cache
 
 from app.config import settings
 from app.generation.generator import AnswerGenerator
-from app.generation.llm import OllamaChatClient
+from app.generation.llm import ChatClient, OllamaChatClient
 from app.ingestion.chunker import SectionChunker
 from app.ingestion.loader import load_manifest
 from app.ingestion.pipeline import IngestionPipeline
-from app.pipeline.rag_pipeline import RagPipeline
-from app.retrieval.embeddings import OllamaEmbedder
+from app.rag_pipeline import RagPipeline
 from app.retrieval.evidence_analyzer import EvidenceAnalyzer
-from app.retrieval.reranker import NoOpReranker
+from app.retrieval.reranker import LLMReranker, NoOpReranker, Reranker
 from app.retrieval.retriever import Retriever
-from app.retrieval.vector_store import ChromaVectorStore
+from app.retrieval.vector_store import ChromaVectorStore, OllamaEmbedder
 from app.retrieval.version_resolver import VersionResolver
 from app.safety.classifier import InputClassifier
 from app.safety.guardrails import ContextSanitizer, OutputGuard
@@ -36,6 +35,20 @@ def _vector_store() -> ChromaVectorStore:
     )
 
 
+@lru_cache
+def _chat_client() -> ChatClient:
+    return OllamaChatClient(model=settings.ollama_llm_model, host=settings.ollama_host)
+
+
+def _reranker() -> Reranker:
+    return LLMReranker(_chat_client()) if settings.rerank_enabled else NoOpReranker()
+
+
+def get_vector_store() -> ChromaVectorStore:
+    """Public accessor used by the upload/delete endpoints."""
+    return _vector_store()
+
+
 def build_ingestion_pipeline() -> IngestionPipeline:
     return IngestionPipeline(
         documents_dir=settings.documents_dir,
@@ -45,22 +58,23 @@ def build_ingestion_pipeline() -> IngestionPipeline:
     )
 
 
-@lru_cache
 def build_rag_pipeline() -> RagPipeline:
+    """Not cached: manifest is re-read on every call so an uploaded or
+    deleted document is reflected immediately. Cheap - only the embedder,
+    vector store and chat client (cached above) are expensive to build."""
     manifest_entries = list(load_manifest(settings.manifest_path).values())
     return RagPipeline(
         classifier=InputClassifier(),
         retriever=Retriever(vector_store=_vector_store(), top_k=settings.top_k),
-        reranker=NoOpReranker(),
+        reranker=_reranker(),
+        rerank_top_n=settings.rerank_top_n,
         version_resolver=VersionResolver(manifest_entries),
         evidence_analyzer=EvidenceAnalyzer(
             similarity_threshold=settings.similarity_threshold,
             ambiguity_margin=settings.ambiguity_margin,
         ),
         sanitizer=ContextSanitizer(),
-        generator=AnswerGenerator(
-            chat_client=OllamaChatClient(model=settings.ollama_llm_model, host=settings.ollama_host)
-        ),
+        generator=AnswerGenerator(chat_client=_chat_client()),
         output_guard=OutputGuard(),
         as_of_date=settings.as_of_date,
     )

@@ -1,7 +1,5 @@
-"""Chat completion client. AnswerGenerator depends on the ChatClient Protocol
-below, not on Ollama specifically - swapping to vLLM or llama.cpp's OpenAI-
-compatible server later means adding one new class here, not touching
-generation logic.
+"""Chat completion client. Depends on the ChatClient protocol, not on Ollama
+directly, so a different local model server can be swapped in later.
 """
 from typing import Protocol
 

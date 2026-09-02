@@ -1,28 +1,13 @@
-"""Decides what retrieval actually found, before generation decides how to
-respond. This is the single place that turns "here are some chunks" into one
-of four outcomes - sufficient / insufficient / conflicting / ambiguous - so
-that behaviour is a testable, inspectable decision rather than something left
-implicit in how the LLM happens to react to a prompt.
+"""Classifies what retrieval found into one outcome - sufficient /
+insufficient / conflicting / ambiguous - so the response strategy is a
+testable decision, not implicit LLM behaviour.
 
-Two heuristics are deliberately simple, and both limitations are called out
-in the README rather than hidden:
-
-1. Conflicting-document detection uses a fixed registry of document pairs
-   known (by manual corpus review) to describe the same fact differently
-   without one superseding the other - e.g. LEG-TRM-004 (Legal, "this
-   schedule prevails") vs SUP-FAQ-001 (Customer Success FAQ, overdue for
-   review) on the Atlas Enterprise refund window. A production system with
-   an open-ended, changing corpus would need automated contradiction
-   detection (e.g. pairwise NLI or an LLM-as-judge pass over co-retrieved
-   chunks), not a hand-maintained list.
-
-2. Ambiguity detection is a score-spread + section-diversity heuristic: if
-   several top chunks come from clearly different sections with no chunk
-   standing out on score, the question probably has more than one plausible
-   referent (e.g. "what is the limit?" against a document with five kinds of
-   limit). This is a proxy, not semantic reasoning about what "ambiguous"
-   means - it will under- or over-trigger on corpora this hasn't been tuned
-   against.
+Two deliberately simple heuristics (limitations, see README):
+1. Conflict detection uses a hand-maintained registry of document pairs
+   known to disagree (KNOWN_CONFLICT_PAIRS) - not automated contradiction
+   detection.
+2. Ambiguity detection is a score-spread + section-diversity proxy, not
+   semantic reasoning about the question.
 """
 from dataclasses import dataclass
 
@@ -88,5 +73,7 @@ class EvidenceAnalyzer:
         sections = {c.chunk.section for c in top}
         if len(sections) < self._ambiguity_min_sections:
             return False
-        score_spread = top[0].score - top[-1].score
-        return score_spread < self._ambiguity_margin
+        # min/max rather than positional top[0]/top[-1]: chunks may have been
+        # reordered by a reranker, so the list isn't guaranteed sorted by score.
+        scores = [c.score for c in top]
+        return (max(scores) - min(scores)) < self._ambiguity_margin

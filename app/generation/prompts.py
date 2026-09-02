@@ -1,7 +1,5 @@
-"""Prompt construction: one hardened system prompt, plus one instruction
-variant per EvidenceOutcome. This is where grounding and injection-resistance
-are actually enforced - everything upstream (retrieval, evidence analysis)
-exists to feed a decision into this module, not to make the decision itself.
+"""Builds the LLM prompt: one system prompt plus one instruction per
+EvidenceOutcome. Grounding and injection-resistance rules live here.
 """
 from app.generation.llm import ChatMessage
 from app.models import EvidenceAssessment, EvidenceOutcome, RetrievedChunk
