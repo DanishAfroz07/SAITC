@@ -1,24 +1,34 @@
-"""Single entrypoint for the whole app.
+"""Entrypoint. Run as a module from the project root:
 
-- `uvicorn app.main:app --reload` serves the FastAPI HTTP API.
-- `python -m app.main ingest` runs ingestion once from the CLI.
-- `python -m app.main chat` opens an interactive question/answer REPL.
+  python -m app.main          starts the HTTP API (default)
+  python -m app.main ingest   ingests the full corpus once, via the CLI
+  python -m app.main chat     interactive question/answer REPL
 
-Both CLI commands and the API call the same app.wiring composition root, so
-there is exactly one code path for "ask a question" and one for "ingest".
+(`python app/main.py` does NOT work - `app` only resolves as a package when
+started with `-m` from the project root.)
 """
 import argparse
 import logging
 
+import uvicorn
 from fastapi import FastAPI
 
-from app.api.routes import router
+from app.api.controllers import document_controller, health_controller, ingest_controller, query_controller
+from app.config import settings
 from app.wiring import build_ingestion_pipeline, build_rag_pipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(title="Cerulean Systems RAG Assistant")
-app.include_router(router)
+app.include_router(health_controller.router)
+app.include_router(query_controller.router)
+app.include_router(ingest_controller.router)
+app.include_router(document_controller.router)
+
+
+def _run_serve() -> None:
+    print(f"Starting API on http://{settings.api_host}:{settings.api_port} - docs at /docs")
+    uvicorn.run(app, host=settings.api_host, port=settings.api_port)
 
 
 def _run_ingest() -> None:
@@ -47,9 +57,10 @@ def _run_chat() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Cerulean Systems RAG assistant CLI")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("ingest", help="Ingest the document corpus into the vector store")
+    parser = argparse.ArgumentParser(description="Cerulean Systems RAG assistant")
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("serve", help="Start the HTTP API (also the default with no command)")
+    subparsers.add_parser("ingest", help="Ingest the full document corpus into the vector store")
     subparsers.add_parser("chat", help="Ask the assistant questions interactively")
     args = parser.parse_args()
 
@@ -57,6 +68,8 @@ def main() -> None:
         _run_ingest()
     elif args.command == "chat":
         _run_chat()
+    else:
+        _run_serve()
 
 
 if __name__ == "__main__":

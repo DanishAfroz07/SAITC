@@ -1,14 +1,6 @@
-"""Detects user-side prompt injection / system-prompt extraction / policy
-bypass intent BEFORE a query reaches retrieval or generation, so those
-requests get a fast, deterministic refusal instead of depending on the LLM
-to resist them on its own every time.
-
-Regex/keyword matching is a fast, auditable first line of defence for a
-small, known threat surface. It is not a general-purpose jailbreak detector:
-a rephrased or obfuscated attack can slip past it. A production system would
-put a trained or LLM-based classifier behind this same InputClassifier
-interface as a second layer, in addition to (not instead of) the system
-prompt's own defences in generation/prompts.py - see README limitations.
+"""Flags user-side prompt injection / policy-bypass intent before a query
+reaches retrieval or generation. Regex-based - fast and auditable, but not a
+general jailbreak detector (see README limitations).
 """
 import re
 

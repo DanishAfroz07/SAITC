@@ -1,13 +1,7 @@
-"""Splits extracted document text into retrieval-sized chunks.
-
-The corpus README calls out table handling as "one of the more interesting
-decisions" in this exercise. The approach here: detect section headings and
-pipe-delimited table rows structurally, then chunk each section's prose
-independently from its tables - a table is always kept whole in its own
-chunk, never split row by row, and never merged with surrounding prose.
-This preserves the row/column relationships an LLM needs to read a table
-correctly (e.g. "SAR 25,001 to SAR 100,000 -> Finance Manager and CEO,
-jointly") which naive fixed-size windowing would risk cutting across.
+"""Splits document text into chunks, section by section. Tables (detected
+as runs of pipe-delimited lines) are always kept whole in their own chunk,
+never split row by row or merged with prose - so the model always sees a
+table row's columns together, e.g. "SAR 100,000 | Board approval".
 """
 import re
 from dataclasses import dataclass
@@ -66,16 +60,9 @@ class SectionChunker:
         return sections
 
     def _split_section_body(self, lines: list[str]) -> list[tuple[str, bool]]:
-        """Walks a section's lines, grouping table rows separately from
-        prose, then yields (text, is_table) pieces in original order.
-
-        A blank line encountered while a table is being accumulated is
-        dropped rather than treated as a break: PDF text extraction can
-        introduce a spurious blank line between a table's header row and its
-        body rows (a rendering artefact, not a real paragraph break), and a
-        table must never be split into two chunks because of it. A blank
-        line is only ever a real break between two prose paragraphs.
-        """
+        """Groups table rows separately from prose. A blank line inside a
+        table run is dropped, not treated as a break - PDF extraction can
+        insert one between a table's header and body rows as an artefact."""
         pieces: list[tuple[str, bool]] = []
         prose_buffer: list[str] = []
         table_buffer: list[str] = []

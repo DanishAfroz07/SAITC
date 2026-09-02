@@ -1,11 +1,17 @@
-"""Turns retrieved, assessed evidence into a grounded, cited Answer. Owns no
-decision logic of its own - the outcome was already decided by
-EvidenceAnalyzer, and the wording per outcome lives in prompts.py.
-"""
-from app.generation.citations import build_citations
+"""Calls the LLM and builds the final cited Answer."""
 from app.generation.llm import ChatClient
 from app.generation.prompts import build_messages
-from app.models import Answer, EvidenceAssessment
+from app.models import Answer, Citation, EvidenceAssessment, RetrievedChunk
+
+
+def _build_citations(chunks: list[RetrievedChunk]) -> list[Citation]:
+    """De-duplicated citations, one per document_id, in relevance order."""
+    seen: dict[str, Citation] = {}
+    for retrieved in chunks:
+        m = retrieved.chunk.metadata
+        if m.document_id not in seen:
+            seen[m.document_id] = Citation(document_id=m.document_id, title=m.title, effective_date=m.effective_date)
+    return list(seen.values())
 
 
 class AnswerGenerator:
@@ -15,5 +21,5 @@ class AnswerGenerator:
     def generate(self, query: str, assessment: EvidenceAssessment) -> Answer:
         messages = build_messages(query, assessment)
         text = self._chat_client.complete(messages)
-        citations = build_citations(assessment.chunks)
+        citations = _build_citations(assessment.chunks)
         return Answer(text=text, citations=citations, outcome=assessment.outcome)

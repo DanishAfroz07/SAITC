@@ -1,13 +1,11 @@
-"""Resolves supersession chains across documents, using manifest metadata only.
+"""Tags chunks as superseded once a formal successor document (per the
+manifest's `supersedes` field) is effective as of the as-of date - e.g.
+SALES-PL-2025 -> superseded once SALES-PL-2026 takes effect.
 
-This module answers exactly one question: "has this document been formally
-superseded by a newer one, as of the as-of date?" (e.g. SALES-PL-2025 was
-superseded by SALES-PL-2026 on 2026-03-01). It deliberately does NOT try to
-adjudicate conflicts between two documents that do not supersede each other
-(e.g. LEG-TRM-004 vs SUP-FAQ-001 on Enterprise refund windows) - that kind of
-conflict is resolved by a precedence statement written into the document
-text itself ("this schedule prevails"), not by comparing dates, so it belongs
-to EvidenceAnalyzer instead.
+Only handles this kind of dated supersession. A conflict between two
+documents that don't supersede each other (e.g. LEG-TRM-004 vs SUP-FAQ-001)
+is resolved by a precedence statement in the text, not by dates - that's
+EvidenceAnalyzer's job instead.
 """
 import re
 from datetime import date
@@ -25,10 +23,9 @@ def _extract_predecessor_id(supersedes: str | None) -> str | None:
 
 
 class VersionResolver:
-    """Builds a document_id -> successor map from the manifest, restricted to
-    predecessors that are themselves present as separate documents in the
-    corpus (a same-ID version bump like "HR-POL-002 v3.6" has no chunks of
-    its own to tag, since only the current version was supplied)."""
+    """Builds a document_id -> successor map from the manifest. Ignores a
+    same-ID version bump (e.g. "HR-POL-002 v3.6") since only the current
+    version's chunks exist to tag."""
 
     def __init__(self, manifest_entries: list[DocumentMetadata]) -> None:
         known_ids = {entry.document_id for entry in manifest_entries}

@@ -1,14 +1,7 @@
-"""Domain types shared across layers.
-
-Kept as plain dataclasses/enums rather than pydantic models on purpose: these
-are internal contracts between ingestion, retrieval, and generation, not a
-request/response boundary. The API's pydantic schemas (app/api/schemas.py)
-translate to and from these at the edge, so the domain model never has to
-know FastAPI exists.
-"""
+"""Domain types shared across layers (plain dataclasses, not tied to FastAPI)."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 

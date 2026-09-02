@@ -1,8 +1,5 @@
-"""Wires safety, retrieval, evidence assessment and generation into the one
-call both the API and the CLI depend on. This is the composition target, not
-the composition root - it takes fully-built collaborators through its
-constructor (Dependency Inversion) and is built by app/wiring.py, so it can
-be unit tested with fakes for every collaborator.
+"""Wires safety, retrieval, reranking, evidence assessment and generation
+into the one `answer()` call the API and CLI both use. Built by app/wiring.py.
 """
 from datetime import date
 
@@ -33,6 +30,7 @@ class RagPipeline:
         classifier: InputClassifier,
         retriever: Retriever,
         reranker: Reranker,
+        rerank_top_n: int,
         version_resolver: VersionResolver,
         evidence_analyzer: EvidenceAnalyzer,
         sanitizer: ContextSanitizer,
@@ -43,6 +41,7 @@ class RagPipeline:
         self._classifier = classifier
         self._retriever = retriever
         self._reranker = reranker
+        self._rerank_top_n = rerank_top_n
         self._version_resolver = version_resolver
         self._evidence_analyzer = evidence_analyzer
         self._sanitizer = sanitizer
@@ -56,13 +55,21 @@ class RagPipeline:
             return Answer(text=_REFUSAL_TEXT[verdict], citations=[], outcome=EvidenceOutcome.INSUFFICIENT)
 
         chunks = self._retriever.retrieve(query)
-        chunks = self._reranker.rerank(query, chunks)
         chunks = self._version_resolver.tag_superseded(chunks, self._as_of_date)
 
         for retrieved in chunks:
             retrieved.chunk.text = self._sanitizer.sanitize(retrieved.chunk.text)
 
+        # Evidence is assessed on the full retrieved set BEFORE reranking, so
+        # reranking can never hide one side of a detected conflict. Reranking
+        # then reorders the decided chunk set for a cleaner generation
+        # context, and only narrows it (rerank_top_n) when that's safe - i.e.
+        # not for CONFLICTING/AMBIGUOUS, where every chunk must stay visible.
         assessment = self._evidence_analyzer.assess(chunks)
+        assessment.chunks = self._reranker.rerank(query, assessment.chunks)
+        if assessment.outcome == EvidenceOutcome.SUFFICIENT:
+            assessment.chunks = assessment.chunks[: self._rerank_top_n]
+
         answer = self._generator.generate(query, assessment)
 
         safe_text, was_flagged = self._output_guard.check(answer.text)
