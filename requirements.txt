@@ -1,0 +1,26 @@
+# --- Web API ---
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+
+# --- Config / validation ---
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-dotenv==1.0.1
+
+# --- Ingestion ---
+pymupdf==1.28.2
+
+# --- Retrieval ---
+# Note: chromadb versions below ~1.x pull in chroma-hnswlib, which has no
+# prebuilt wheel for recent Python/Windows combos and needs the Microsoft
+# C++ Build Tools to compile from source. 1.5.9+ ships a working wheel.
+chromadb==1.5.9
+
+# --- Generation (local model client) ---
+ollama==0.6.2
+
+# --- Tests ---
+pytest==9.1.1
+
+# --- Dev-only: synthetic corpus PDF generation (scripts/build_corpus.py) ---
+fpdf2==2.8.8
