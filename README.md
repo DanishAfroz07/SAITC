@@ -1,453 +1,493 @@
-# Cerulean Systems RAG Assistant (SAITC take-home)
+# Cerulean Systems RAG Assistant
 
-A grounded retrieval-augmented assistant over the 13-document Cerulean Systems corpus, built
-so it treats "I don't know" and "these two documents disagree" as first-class answers, not
-failure modes to be papered over.
+A retrieval-augmented assistant over Cerulean Systems' 13-document corpus, built for the SAITC
+Applied AI Engineer take-home. The brief for this exercise was explicit that a smaller,
+honestly-reasoned system beats a bigger one that quietly guesses, so that's the bar I built
+against. Concretely, that meant: only build the pieces the required test questions actually
+exercise, say plainly when something is a heuristic rather than a real solution, and when I ran
+this live against a real model and found bugs, fix them and write down what I found instead of
+tuning the demo until it looked clean.
 
-## Corpus provenance - read this first
+I'll say this up front rather than bury it: this thing does not get all 15 test questions
+right. Two of them (a date calculation and a conflict-resolution phrasing) are still wrong or
+inconsistent as of this write-up, for reasons I understand and explain below. I'd rather hand
+over an accurate account of that than a README that reads better than the system behaves.
 
-This project was built from the assignment's PDFs as text extracted into a conversation, not
-from the original PDF files on disk. `scripts/corpus_content.py` is a faithful transcription
-of that same text (identical facts, numbers, tables, cross-references, and all three embedded
-prompt-injection payloads, verbatim), and `scripts/build_corpus.py` renders it into 13 real
-PDFs plus `data/corpus_manifest.json`, so the ingestion pipeline has real files to run against
-end to end.
+## Before you start: about the corpus files
 
-**If you have the original assignment PDFs**, you can use them instead of the generated ones:
-drop them into `data/documents/` with the same file names `corpus_manifest.json` expects, and
-skip `scripts/build_corpus.py` entirely. `app/ingestion/parser.py` reads metadata from the
-manifest either way, so nothing else in the pipeline changes.
+I received this assignment's corpus as PDF text pasted into a conversation, not as PDF files on
+disk. So `scripts/corpus_content.py` holds a faithful transcription of that text — same facts,
+same numbers, same tables, same three embedded prompt-injection payloads, word for word — and
+`scripts/build_corpus.py` renders it into 13 real PDFs plus `data/corpus_manifest.json`. If you
+have the original assignment PDFs, just drop them into `data/documents/` using the same file
+names the manifest expects, and skip `build_corpus.py` entirely — nothing else changes.
 
-The generated PDFs are simple (one font, pipe-delimited tables rendered as plain text) - they
-exist to exercise the pipeline honestly, not to look like the real documents.
+The generated PDFs are plain (one font, tables rendered as pipe-delimited text). They're there
+to give the ingestion pipeline something real to chew on, not to look like the original
+documents.
 
-## What to install
+---
 
-| Tool | Version tested | Why |
+## Running this on a fresh machine
+
+### What you need first
+
+| Tool | Version I used | Get it from |
 |---|---|---|
-| Python | 3.12.3 | everything runs on it; 3.11+ should also work |
-| [Ollama](https://ollama.com/download) | any recent | serves the local open-weight LLM + embedding model |
-| pip packages | see `requirements.txt` | pinned to versions verified to install cleanly on Windows/Python 3.12 in this environment |
+| Python | 3.12.3 (3.11+ should be fine) | python.org |
+| Ollama | 0.33.2 | https://ollama.com/download |
+| ~5 GB free disk | for the two models below | — |
 
-No GPU, Docker, or external API key is required. Everything - vector store, embeddings, LLM -
-runs locally.
+No GPU needed, no Docker, no API keys, no account signups. Everything — the vector store, the
+embeddings, the LLM — runs on your machine.
 
-> **Windows note**: `requirements.txt` pins `chromadb==1.5.9` specifically because older
-> chromadb versions (~0.5.x) pull in `chroma-hnswlib`, which has no prebuilt wheel for recent
-> Python/Windows combinations and fails to install without the Microsoft C++ Build Tools.
-> 1.5.9 ships a working wheel and needs nothing extra. Found this the hard way while building
-> this project - see the Weaknesses section.
+> **If you're on Windows**, one thing bit me while building this: `requirements.txt` pins
+> `chromadb==1.5.9` on purpose. Older Chroma versions pull in `chroma-hnswlib`, which doesn't
+> ship a prebuilt wheel for recent Python/Windows combos, so pip tries to compile it from source
+> and fails unless you have the Microsoft C++ Build Tools installed. 1.5.9 ships a working wheel
+> and just works. Save yourself the half hour I lost to this.
 
-## Setup, step by step
+### Step by step
 
 ```bash
-# 1. Get the code and enter the project
+# 1. Get into the project folder
 cd SAITC
 
-# 2. Create and activate a virtual environment
+# 2. Create a virtual environment and activate it
 python -m venv .venv
 .venv\Scripts\activate            # Windows
 # source .venv/bin/activate       # macOS/Linux
 
-# 3. Install Python dependencies
+# 3. Install the Python dependencies
 pip install -r requirements.txt
 
-# 4. Install Ollama (https://ollama.com/download), then pull the two models this
-#    project uses - one for chat generation, one for embeddings:
+# 4. Install Ollama if you haven't already: https://ollama.com/download
+#    Then pull the two models this project uses — one for answering,
+#    one for turning text into vectors:
 ollama pull llama3.2:3b
 ollama pull nomic-embed-text
 
-# 5. .env is already committed with working defaults matching the two models
-#    above - open it if you want to change the model, ports, or thresholds.
-#    See "Why one .env file" below for why there's no separate .env.example.
+# 5. Nothing to configure — .env is already committed with working defaults
+#    for the two models above. Open it if you want a different model, a
+#    different port, or to see the tuned retrieval thresholds. (There's no
+#    separate .env.example — see "why one .env file" below for why.)
 
-# 6. Generate the synthetic PDF corpus (see "Corpus provenance" above) -
-#    skip this step if you've dropped the original assignment PDFs into
-#    data/documents/ yourself
+# 6. Build the PDF corpus from the transcribed text
+#    (skip this if you've dropped the original assignment PDFs into data/documents/)
 python scripts/build_corpus.py
 
-# 7. Ingest the corpus into the local vector store
+# 7. Ingest the corpus — extracts, chunks, embeds, and stores all 13 documents
 python -m app.main ingest
 
-# 8. Ask it questions
+# 8. Ask it something
 python -m app.main chat
 ```
 
-### Why one `.env` file, not `.env` + `.env.example`
+That's the whole setup. Step 7 takes under 20 seconds on my machine; step 8 opens an
+interactive prompt where you can just start typing questions.
 
-The usual split exists to keep secrets (API keys, passwords) out of git while still
-documenting what variables exist. Nothing in this project's `.env` is a secret - it's all
-local config (which model to call, which port to serve on, retrieval thresholds) - so the
-split added a second file to keep in sync for no real benefit. `.env` is committed with
-working defaults; edit it directly if you want a different model or port.
-
-Example session:
+A real answer from a real run, copy-pasted, not cleaned up:
 
 ```
-> What is the current price of the Atlas Professional plan?
+> How much notice must an employee give when resigning during probation?
 
-Cerulean Systems' price lists show two different figures for Atlas Professional:
-SAR 4,500/month in the 2025 list [SALES-PL-2025, effective 2025-01-01] and SAR 5,200/month
-in the 2026 list [SALES-PL-2026, effective 2026-03-01]. SALES-PL-2026 supersedes
-SALES-PL-2025 and has been in effect since 1 March 2026, so as of today the current list
-price is SAR 5,200/month for new subscriptions and renewals. Note SALES-PL-2026 itself says
-customers on an active term keep their contracted price until renewal, so an existing
-customer may still legitimately be paying SAR 4,500 until then.
+According to the CONTEXT, during probation, an employee must give 7 calendar days' written
+notice when resigning. This is stated in the following documents:
 
-Sources: [SALES-PL-2025], [SALES-PL-2026]
+[HR-POL-005] (effective_date="2025-06-01")
+
+Employment status | Notice from employee | Notice from company
+During probation, including any extension | 7 calendar days, in writing | 7 calendar days, in writing
+
+Sources: [HR-POL-005]
 ```
 
-## Running the HTTP API (Postman etc.)
+### Why there's only one `.env`, not `.env` + `.env.example`
 
-Start the whole application with one command, run as a module from the project root
-(**not** `python app/main.py` directly - that fails with `ModuleNotFoundError: No module
-named 'app'`, since `app` only resolves as a package when Python is started from the project
-root with `-m`):
+The usual reason to split them is to keep secrets out of git while still documenting what
+config exists. There's nothing secret in this project's config — it's just which model to call,
+which port to serve on, and a handful of retrieval thresholds — so a second file would only be
+something else to keep in sync, for no actual benefit. I just committed `.env` with working
+defaults. Edit it directly if you want to point at a different model or port.
+
+---
+
+## Running the HTTP API and testing it in Postman
+
+Everything above also works as an HTTP API instead of a CLI. Start it with:
 
 ```bash
 python -m app.main
-# equivalent to: python -m app.main serve
-# equivalent to: uvicorn app.main:app --reload   (auto-reload on code changes, for dev)
 ```
 
-This blocks the terminal serving on `http://localhost:8000` (configurable via `API_HOST`/
-`API_PORT` in `.env`). Interactive Swagger docs, where you can try every endpoint without
-Postman, are at `http://localhost:8000/docs`.
+Run this from the project root, as a module. **`python app/main.py` will not work** — it fails
+with `ModuleNotFoundError: No module named 'app'`, because `app` only resolves as an importable
+package when Python is started with `-m` from the root. I hit this myself while testing, so I'm
+flagging it here rather than let you rediscover it.
 
-| Method | Path | Body | What it does |
+This starts a server on `http://localhost:8000` and blocks the terminal. Swagger docs, where
+you can try every endpoint from a browser without touching Postman at all, live at
+`http://localhost:8000/docs`.
+
+### The endpoints
+
+| Method | Path | Body | Does |
 |---|---|---|---|
-| GET | `/health` | - | liveness check |
-| POST | `/ingest` | - | re-ingests every PDF already in `data/documents/` against the manifest, wiping and rebuilding the whole vector store - use for the fixed 13-document corpus |
-| POST | `/documents/upload` | `multipart/form-data`: `file` (required, a PDF) + optional form fields `document_id`, `title`, `version`, `effective_date` (YYYY-MM-DD), `owner`, `classification`, `supersedes` | saves the PDF into `data/documents/`, adds/replaces its entry in `corpus_manifest.json`, and ingests just that document - the endpoint to use for adding an arbitrary PDF from Postman |
-| GET | `/documents` | - | lists every document currently in the manifest |
-| DELETE | `/documents/{document_id}` | - | removes a document's manifest entry, file, and vector store chunks |
-| POST | `/query` | JSON: `{"question": "..."}` | ask the assistant |
+| GET | `/health` | — | liveness check |
+| POST | `/ingest` | — | wipes and rebuilds the whole vector store from every PDF in `data/documents/` |
+| POST | `/documents/upload` | multipart form | adds one new PDF without touching the rest |
+| GET | `/documents` | — | lists everything currently indexed |
+| DELETE | `/documents/{document_id}` | — | removes a document's file, manifest entry, and chunks |
+| POST | `/query` | JSON | ask a question (response includes `retrieval_confidence` — see below) |
 
-**Postman walkthrough for uploading a PDF:**
-1. New request, `POST http://localhost:8000/documents/upload`.
-2. Body tab -> `form-data` (not `raw`/JSON - file uploads need `multipart/form-data`).
-3. Add a key `file`, change its type dropdown from "Text" to **"File"**, and choose a PDF.
-4. Optionally add more keys as plain Text: `document_id`, `title`, `effective_date` (e.g.
-   `2026-08-01`), etc. Any you omit fall back to a sensible default (document_id defaults to
-   the file name, effective_date to today) - see `app/api/controllers/document_controller.py`.
-5. Send. The response includes `chunks_created` - if that's 0, the PDF likely has no
-   extractable text (a scanned image PDF, for example; this pipeline does no OCR).
-6. `GET /documents` to confirm it's listed, then `POST /query` to ask about it.
+### curl versions of each, ready to paste into a terminal or import into Postman
 
-Metadata matters here: this corpus's whole conflict/supersession-resolution behaviour
-(`VersionResolver`, `EvidenceAnalyzer`) depends on `effective_date` and `document_id` being
-meaningful, not placeholder values - an upload with defaults left untouched will be retrievable
-and answerable, but won't participate correctly in a conflict against another document unless
-you set `supersedes` (or add its document_id pair to `KNOWN_CONFLICT_PAIRS`, see
-`app/retrieval/evidence_analyzer.py`) yourself.
+```bash
+curl http://localhost:8000/health
 
-Re-uploading the same `document_id` (even under a different file name) replaces its previous
-chunks rather than duplicating them, and deletes the old file.
+curl -X POST http://localhost:8000/ingest
 
-To run the required evaluation pass over all 15 questions (12 from the assignment + 3 added):
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is the company'"'"'s annual leave policy?"}'
+
+curl http://localhost:8000/documents
+
+curl -X POST http://localhost:8000/documents/upload \
+  -F "file=@/path/to/your/document.pdf" \
+  -F "document_id=CUSTOM-DOC-001" \
+  -F "effective_date=2026-08-27"
+
+curl -X DELETE http://localhost:8000/documents/CUSTOM-DOC-001
+```
+
+(Postman: paste any of the above into the "Import > Raw text" dialog and it'll build the
+request for you — the file upload one needs its `file` field switched to type "File" and a real
+file picked, since curl's `-F "file=@path"` can't carry an actual file into Postman's import.)
+
+A ready-made Postman collection covering all 12 assignment questions plus 3 I added myself is
+in `postman/Cerulean_RAG_Assistant.postman_collection.json` — import that instead of typing
+requests by hand if you want to run through the whole test set quickly. Each request's
+description explains which requirement it's checking.
+
+Two things worth knowing about the upload endpoint: metadata fields (`document_id`, `title`,
+`effective_date`, etc.) are all optional — if you skip them, you get sensible defaults, and the
+document is fully searchable. But this corpus's conflict/version-resolution logic depends on
+`effective_date` and `document_id` being meaningful, so an upload left at defaults won't
+participate correctly in a conflict against another document unless you set those fields
+yourself. Also, re-uploading the same `document_id` replaces its old chunks rather than piling
+up duplicates.
+
+### Running the required evaluation
 
 ```bash
 python -m evaluation.run_eval
 ```
 
-This overwrites `evaluation/results.json` and `evaluation/results.md` with the model's actual
-answers, outcome classification, and citations. **Those files are currently placeholders in
-this repo** - this environment has no Ollama installed, so no model was actually run here; see
-`evaluation/results.md` for why that's disclosed rather than faked, and for how I'd measure
-quality more rigorously than eyeballing 15 answers.
+This runs all 15 questions (the assignment's 12 plus 3 I added) against a live model and
+overwrites `evaluation/results.json` and `evaluation/results.md` with whatever it actually said
+— outcome classification, citations, timing, all of it. Because it overwrites on every run, any
+analysis I wanted to keep lives in `evaluation/methodology.md` instead, which this script never
+touches. That file has the honest account of what a real run turned up: two real bugs it caught
+that are now fixed (with regression tests), and what's still wrong.
 
-To run the test suite (pure logic only - no Ollama or a running vector store needed):
+### Running the tests
 
 ```bash
 pytest tests/ -v
 ```
 
-All 20 tests pass in this environment in well under a second.
+46 tests, all pure logic — no Ollama, no running vector store needed, and they run in under a
+few seconds.
 
-## Hardware and timing
+---
 
-Built and tested on a Windows 11 laptop (the sandboxed environment this was authored in),
-Python 3.12.3, no GPU. Ingestion (chunking + Chroma insertion, excluding the embedding calls
-which need a running Ollama server not present here) processes all 13 documents into 125
-chunks in under 0.1 seconds - the corpus is tiny (the assignment README notes it's under
-100 KB), so ingestion cost is dominated entirely by the embedding model's throughput, not by
-parsing or chunking.
+## Hardware and how long things take
 
-I could not benchmark live Ollama calls in this environment (no Ollama installed here). On a
-laptop CPU, a realistic expectation for `llama3.2:3b` is roughly 1-4 seconds per answer and
-`nomic-embed-text` a few milliseconds per chunk (well under a second for the whole 125-chunk
-corpus) - please treat these as rough expectations to sanity-check against, not measured
-numbers, and note your own actual timings here after running `python -m evaluation.run_eval`.
+Built and tested on a Windows 11 laptop — HP Pavilion 14, AMD Ryzen 5 5625U (6 cores / 12
+threads), 16 GB RAM, no discrete GPU. Everything below is a real number from a real run, not an
+estimate:
+
+- **Ingesting all 13 PDFs** (extract text, chunk, embed via `nomic-embed-text`, write to
+  Chroma): **~17-18 seconds**, producing 121 chunks (22 of them whole tables).
+- **A single query**, on CPU, no GPU: anywhere from **instant to about a minute**. The two
+  security-refusal questions (Q9, Q10) return in effectively 0 seconds, since they're blocked
+  before any model call happens at all. Everything else depends on how much context ends up in
+  the prompt and how long the model's answer runs — short factual lookups land around 10-20
+  seconds, and a broad question that pulls in several documents can take 40-60 seconds. Across
+  the full 15-question set, the average was about 23 seconds per question.
+
+I also tried swapping in a larger model (`qwen2.5:7b-instruct`, 4.7 GB) for generation only,
+just to see what it would cost — each answer took roughly **90-110 seconds** on this same
+hardware, 4-6x slower than the 3B default. More on why I tried that, and what it actually
+bought me, in the weaknesses section below.
+
+---
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    subgraph Ingestion["Ingestion (python -m app.main ingest)"]
-        PDF["13 PDFs + corpus_manifest.json"] --> LOAD["loader.py + parser.py\n(extract text, resolve metadata)"]
-        LOAD --> CHUNK["chunker.py\nSectionChunker\n(tables kept whole)"]
-        CHUNK --> STORE["vector_store.py\nChromaVectorStore"]
+    subgraph Ingestion["Ingestion — python -m app.main ingest"]
+        PDF["13 PDFs + corpus_manifest.json"] --> LOAD["loader.py + parser.py\nextract text, resolve metadata"]
+        LOAD --> CHUNK["chunker.py\nsection-aware, tables kept whole"]
+        CHUNK --> STORE["vector_store.py\nChroma, embedded via Ollama"]
     end
 
-    subgraph Query["Query time (CLI chat / POST /query)"]
-        Q["User question"] --> CLS["safety/classifier.py\nInputClassifier"]
-        CLS -- "injection / out-of-scope" --> REFUSE["canned refusal\n(no retrieval, no LLM call)"]
-        CLS -- "safe" --> RET["retrieval/retriever.py\n(top_k candidates)"]
-        RET --> VER["retrieval/version_resolver.py\ntag superseded docs"]
-        VER --> SAN["safety/guardrails.py\nContextSanitizer\n(strip HTML-comment payloads)"]
-        SAN --> EV["retrieval/evidence_analyzer.py\nsufficient / insufficient /\nconflicting / ambiguous"]
-        EV --> RR["retrieval/reranker.py\nLLMReranker\n(reorder; narrow to rerank_top_n\nonly if SUFFICIENT)"]
-        RR --> GEN["generation/generator.py\n+ prompts.py + Ollama LLM"]
-        GEN --> OG["safety/guardrails.py\nOutputGuard"]
-        OG --> ANS["Answer + citations"]
+    subgraph Query["A single question — CLI chat or POST /query"]
+        Q["question"] --> CLS["classifier.py\nis this an injection or bypass attempt?"]
+        CLS -- "yes" --> REFUSE["canned refusal\n(no retrieval, no LLM call)"]
+        CLS -- "no" --> RET["retriever.py\ntop-k candidates"]
+        RET --> VER["version_resolver.py\ntag anything superseded"]
+        VER --> SAN["guardrails.py: ContextSanitizer\nstrip HTML-comment payloads"]
+        SAN --> EV["evidence_analyzer.py\nsufficient / insufficient /\nconflicting / ambiguous"]
+        EV --> RR["reranker.py\nreorder (off by default)"]
+        RR --> GEN["generator.py + prompts.py\none call to the LLM"]
+        GEN --> OG["guardrails.py: OutputGuard\nlast check on the answer"]
+        OG --> ANS["answer + citations"]
     end
 
-    STORE -. "embeddings via Ollama\n(nomic-embed-text)" .-> RET
+    STORE -. "same embedding model,\nused again at query time" .-> RET
 ```
 
-`app/wiring.py` is the composition root: the only module that constructs concrete classes
-from `Settings` and wires them together. Everything else - `RagPipeline`, `IngestionPipeline`,
-the API controllers, the CLI - depends only on interfaces (`ChatClient`, `Embedder`,
-`Reranker`) passed into its constructor, which is what makes the pure-logic layers (chunker,
-version resolver, evidence analyzer, reranker, classifier, guardrails) unit-testable without
-Ollama or Chroma running - see `tests/`.
+`app/wiring.py` is the one place that builds concrete objects and wires them together —
+everything else (the pipeline, the API layer, the CLI) depends on interfaces, not concrete
+classes, which is what lets me unit-test the chunker, the version resolver, the evidence
+analyzer, and the safety checks without Ollama or Chroma running at all.
 
-Note evidence assessment happens **before** reranking, not after: reranking must never be able
-to hide one side of a detected conflict by reordering it out of a narrowed top-N, so the
-narrowing step only ever applies to the SUFFICIENT case (see `app/rag_pipeline.py`).
+One deliberate ordering detail: evidence gets assessed *before* reranking runs, not after.
+Otherwise a reranker could reorder a genuine conflict's two sides so one of them falls out of a
+narrowed top-N before the model ever sees it existed.
 
-## Project structure - what each folder is for
+### Where everything lives
 
 ```
 SAITC/
-├── app/                One Python package: the whole running application.
-│   ├── main.py          Entrypoint - run with `python -m app.main`.
-│   ├── config.py        All settings, read once from .env.
-│   ├── models.py         Shared domain types (Chunk, Answer, etc).
-│   ├── wiring.py         Builds and wires every component together.
-│   ├── rag_pipeline.py    Orchestrates one query: safety -> retrieve -> assess -> rerank -> generate.
-│   ├── api/              HTTP layer, controller/service split (see below). -> req: HTTP interface
-│   ├── ingestion/         PDF -> text -> chunks -> vector store.    -> req #1, #2
-│   ├── retrieval/         Vector store, retrieval, reranking, conflict/version/ambiguity logic. -> req #3, #7, #8
-│   ├── generation/        Prompts + LLM call + citations.          -> req #3, #4, #6
-│   └── safety/            Injection/bypass detection, both directions. -> req #9, Security
-├── data/                 The corpus itself (not code).
-│   ├── documents/          The 13 PDFs.
-│   └── corpus_manifest.json  Metadata for each PDF (see below).
-├── scripts/              One-time corpus generation (not part of the running app).
-├── evaluation/           The required 12+3 question run + results + methodology write-up.
-├── tests/                Unit tests for every pure-logic module (no Ollama/Chroma needed).
-├── postman/              Importable Postman collection for manual/API testing.
-├── requirements.txt, .env, .gitignore, README.md
+├── app/                    the running application
+│   ├── main.py               entrypoint — python -m app.main
+│   ├── config.py             every setting, read once from .env
+│   ├── models.py             shared types: Chunk, Answer, etc.
+│   ├── wiring.py             builds and connects everything
+│   ├── rag_pipeline.py       one query's journey: safety → retrieve → assess → rerank → generate
+│   ├── api/                  HTTP layer (controllers + one service, see below)
+│   ├── ingestion/             PDF → text → chunks → vector store
+│   ├── retrieval/             vector store, hybrid search, reranking, conflict/ambiguity logic
+│   ├── generation/             prompts, the LLM call, citation building
+│   └── safety/                 catches injection attempts, both from users and from documents
+├── data/                    the corpus itself — not code
+│   ├── documents/               the 13 PDFs
+│   └── corpus_manifest.json     metadata for each one (see note below)
+├── scripts/                 one-time corpus generation, not part of the running app
+├── evaluation/              the required question run, results, and my write-up of what it found
+├── tests/                   unit tests, no Ollama/Chroma needed to run them
+├── postman/                 an importable collection for manual testing
+└── requirements.txt, .env, .gitignore, README.md
 ```
 
-Nothing above is unused scaffolding - every folder maps to something the assignment asks
-for, noted next to it. `scripts/` and `postman/` are the two folders that aren't part of the
-running application itself: `scripts/` only exists because this session received the corpus
-as extracted text rather than PDF files (see "Corpus provenance"); `postman/` is a testing
-aid, not app code.
+Nothing in here is leftover scaffolding — `scripts/` only exists because I got the corpus as
+text instead of files, and `postman/` is a testing convenience, not application code. Everything
+else maps to something the assignment actually asks for.
 
-### `app/api/` - controller/service split
+#### `app/api/` specifically
 
 ```
 app/api/
-├── schemas.py              Pydantic request/response models (the HTTP contract).
-├── controllers/            One thin file per resource - HTTP only, no business logic.
-│   ├── health_controller.py     GET /health
-│   ├── query_controller.py       POST /query          -> calls RagPipeline
-│   ├── ingest_controller.py      POST /ingest          -> calls IngestionPipeline
-│   └── document_controller.py    /documents...         -> calls DocumentService
+├── schemas.py            the HTTP request/response shapes
+├── controllers/           one thin file per resource, HTTP concerns only
+│   ├── health_controller.py
+│   ├── query_controller.py     → calls RagPipeline
+│   ├── ingest_controller.py    → calls IngestionPipeline
+│   └── document_controller.py  → calls DocumentService
 └── services/
-    └── document_service.py   Upload/list/delete business logic (file I/O, manifest updates).
+    └── document_service.py   upload/list/delete: file handling, manifest updates
 ```
 
-`RagPipeline` and `IngestionPipeline` already **are** the service layer for `/query` and
-`/ingest` - they contain the real logic, are fully unit-testable on their own, and know
-nothing about FastAPI. Wrapping them in a `QueryService`/`IngestionService` that just forwards
-to them would be a pass-through with no purpose, so there isn't one. `DocumentService` exists
-because upload/list/delete logic (saving a file, upserting the manifest, cleaning up an
-orphaned file on re-upload) didn't have a home anywhere else - it's the one place the API
-layer does real work beyond translating a request into a pipeline call.
+`RagPipeline` and `IngestionPipeline` already *are* the service layer for asking questions and
+ingesting — they hold the real logic, they're fully testable on their own, and they don't know
+FastAPI exists. Wrapping them in another service class that just forwards the call would be pure
+ceremony, so I didn't. `DocumentService` exists because upload/list/delete logic (saving a file,
+updating the manifest, cleaning up an orphaned file on re-upload) genuinely didn't belong
+anywhere else — it's the one place the API does real work beyond translating a request into a
+pipeline call.
 
-### What corpus_manifest.json actually does (and doesn't do)
+---
 
-This is the one JSON file the client provided. **It is never ingested as content** - it is
-never chunked, embedded, or retrieved. Its only job is to supply each PDF's metadata
-(document ID, version, effective date, owner, classification, supersedes) to
-`app/ingestion/loader.py`, which attaches that metadata to every chunk produced from that PDF.
-That metadata is what `version_resolver.py` and `evidence_analyzer.py` later use to reason
-about "which price list is current" or "which document takes precedence" - it never appears
-in the vector store as its own searchable text.
+## What I picked, and why
 
-So: `/ingest` reads the manifest for metadata, then reads and embeds the actual PDFs it
-points to. There is no code path that embeds `corpus_manifest.json`'s own JSON content as if
-it were a document, and there shouldn't be - it isn't information a customer or employee would
-ever ask a question about, it's the index card describing the real documents.
+- **Ollama for both the chat model and the embeddings.** One runtime dependency instead of two
+  — no separate `sentence-transformers`/PyTorch install — and it satisfies the assignment's
+  "open-weight, runs locally" requirement without any extra moving parts. `llama3.2:3b` is
+  deliberately modest so a CPU-only laptop can run it in reasonable time; if you've got the
+  hardware, swap `OLLAMA_LLM_MODEL` in `.env` for something bigger.
+- **ChromaDB, embedded, no separate server.** At 13 documents and ~120 chunks there's no
+  argument for a standalone vector database process — an embedded store keeps the whole thing
+  runnable with one command.
+- **PyMuPDF for text extraction** — the corpus README recommends it, and it handles these
+  text-based PDFs cleanly with no OCR step needed.
+- **Chunking that respects section boundaries and never splits a table.** The corpus README
+  specifically calls out table handling as one of the more interesting decisions here, and I
+  think it's right to call out: splitting a table row-by-row would let the model see "SAR
+  25,001 to SAR 100,000" without ever seeing "Finance Manager and CEO, jointly" sitting right
+  next to it in the same row. Every table gets chunked and retrieved as one indivisible unit.
+- **A hand-maintained list of document pairs I know conflict, rather than automated
+  contradiction detection.** For 13 documents I've read myself, knowing that LEG-TRM-004 and
+  SUP-FAQ-001 disagree about the Enterprise refund window is more reliable than trying to get an
+  embedding-similarity heuristic to discover that on its own. This obviously doesn't scale past
+  a corpus I've personally read — see the weaknesses below, it's #5.
+- **FastAPI as the main way to run this, with a CLI alongside it.** `python -m app.main` starts
+  the API so it's easy to drive from Postman, including dropping in an arbitrary new PDF. The
+  query/ingest routes are still just translation layers over the same pipelines the CLI calls —
+  the upload/delete routes are the one place the API does something the CLI has no equivalent
+  of, since the CLI was never meant to accept a brand-new document.
 
-## Technology choices and why
+## About the `retrieval_confidence` field
 
-- **Ollama for both chat and embeddings** (`llama3.2:3b` + `nomic-embed-text`): one runtime
-  dependency instead of two (no separate `sentence-transformers`/PyTorch stack), satisfies the
-  assignment's "open-weight, runs locally" requirement directly, and keeps the POC's install
-  footprint small. `llama3.2:3b` is a deliberately modest default so it runs on a CPU-only
-  laptop in reasonable time; swap `OLLAMA_LLM_MODEL` in `.env` for a bigger model if you have
-  the hardware.
-- **ChromaDB, persistent, embedded** (no separate server process): the corpus is 13 documents
-  and ~125 chunks - there is no scale argument for a standalone vector database service here,
-  and an embedded store keeps the whole system runnable with one command.
-- **PyMuPDF** for text extraction: recommended in the corpus README, extracts the text-based
-  PDFs cleanly with no OCR needed.
-- **Section-aware chunking, tables kept whole** (`app/ingestion/chunker.py`): the corpus
-  README calls out table handling as one of the more interesting chunking decisions. Splitting
-  a table row-by-row across chunks would let the model see "SAR 25,001 to SAR 100,000" without
-  ever seeing "Finance Manager and CEO, jointly" next to it. Every table is chunked and
-  retrieved as one indivisible unit instead.
-- **A fixed registry of known conflicting document pairs, not automated contradiction
-  detection** (`app/retrieval/evidence_analyzer.py`): for a 13-document corpus where I can
-  read every document myself, hand-identifying that LEG-TRM-004 and SUP-FAQ-001 disagree on
-  the Enterprise refund window is more reliable than an embedding-similarity heuristic trying
-  to guess it. This does not scale - see Limitations and Weaknesses below.
-- **FastAPI as the primary interface, with a CLI alongside it**: `python -m app.main` starts
-  the API so it can be exercised from Postman, including uploading an arbitrary PDF via
-  `POST /documents/upload`. For querying and full-corpus ingestion the routes still contain no
-  logic beyond request/response translation - they call the same `RagPipeline`/
-  `IngestionPipeline` the `chat`/`ingest` CLI commands use. The upload/list/delete routes are
-  the one place the API does own real logic (saving a file, upserting the manifest) that the
-  CLI has no equivalent of, since the CLI was never meant to accept an arbitrary new document.
+Every `SUFFICIENT` answer (from `/query`, or printed after each `chat` answer) carries a
+`retrieval_confidence` of `high`, `medium`, or `low` — every other outcome carries
+`not_applicable`. I want to be precise about what this measures, because it would be easy to
+build this wrong: **it is not a probability that the answer is correct.** It's purely "how
+strongly did the retrieved passage match the question," derived from the top chunk's cosine
+similarity score (thresholds calibrated against scores actually seen in live testing — see
+`app/retrieval/evidence_analyzer.py`).
 
-## Assumptions
-
-- "Current" is answered as at **2026-08-27**, per the corpus README, via `AS_OF_DATE` in
-  `.env` (not the real system clock) - reproducible regardless of when you actually run this.
-- The manifest (`corpus_manifest.json`) is the source of truth for metadata; the in-PDF header
-  block is cross-checked against it only to catch authoring mistakes (`parser.cross_check_metadata`),
-  never to override it.
-- A document's "supersession" relationship (which lets `version_resolver.py` resolve the
-  SALES-PL-2025 → SALES-PL-2026 conflict from dates alone) is distinct from a document
-  asserting textual precedence over another (LEG-TRM-004 saying "this schedule prevails" over
-  the FAQ) - the two are handled by different modules for that reason, see Architecture above.
 
 ## Known limitations
 
-- **Ambiguity and conflict detection are heuristics, not semantic reasoning.** Ambiguity
-  detection (`EvidenceAnalyzer._looks_ambiguous`) is a score-spread + section-diversity proxy;
-  conflict detection is a hand-maintained registry of two document IDs. Both are documented
-  in the module docstrings and both are corpus-specific engineering, not general solutions.
-- **Injection defences are corpus-aware, not general.** `ContextSanitizer` strips HTML
-  comments (the one payload uses this); `OutputGuard` checks for the exact phrases the three
-  known payloads try to make the model assert. A genuinely novel injection technique, or one
-  that doesn't use these carriers, is not guaranteed to be caught by these two checks alone -
-  the system prompt's "context is data, never instructions" rule is the real first line of
-  defence, these are defence-in-depth on top of it.
-- **Reranking is LLM-based, adding one extra model call per query.** `LLMReranker`
-  (`app/retrieval/reranker.py`) asks the chat model to order the candidates itself rather than
-  using a dedicated cross-encoder reranking model - see WALKTHROUGH.md for why. **No hybrid
-  (keyword + semantic) search** - not implemented; the assignment lists it as optional, and
-  semantic-only search retrieves cleanly at this corpus's size.
-- **Single-turn only.** There is no conversation memory - each question is answered
-  independently. A real assistant would need to resolve "and what about Starter?" following
-  Q4, which this cannot do today.
-- **No authentication, rate limiting, or multi-tenant isolation** on the FastAPI layer - it is
-  a local single-user POC, not a deployable service.
+- **Ambiguity and conflict detection are heuristics, not understanding.** The ambiguity check is
+  a score-spread-plus-section-diversity proxy; conflict detection is that hand-typed list of two
+  document IDs mentioned above. Both are named as heuristics in their own docstrings, and both
+  are corpus-specific engineering rather than a general solution — see weakness #2 for what this
+  actually broke in a live run, not hypothetically.
+- **The injection defences are aware of the three specific payloads in this corpus, not
+  injection attempts in general.** `ContextSanitizer` strips HTML comments because that's the
+  carrier one of the three payloads uses; `OutputGuard` checks for phrases the other two try to
+  make the model assert, plus a check for a fake "system prompt" header the model sometimes
+  invents on its own (more on that below). The real first line of defence is the system prompt's
+  rule that document content is data, never instruction — these two checks are backup, not the
+  main plan, and a genuinely novel injection technique isn't guaranteed to trip either of them.
+- **Reranking and hybrid search are both real and both off by default.** I built and tested both
+  — `LLMReranker` and a from-scratch BM25 index for hybrid search — as candidate fixes for a
+  wrong-answer bug I found (weakness #1). Neither fixed it: both competing tables in that bug
+  use the exact same column header, so a keyword signal can't tell them apart, and the reranker
+  still ranked the wrong one first. That's a tested negative result, not a guess, and it's why
+  both stay off — an extra LLM call or an extra retrieval pass isn't worth paying for without a
+  demonstrated benefit at this corpus's size.
+- **No memory across questions.** Every question is answered on its own; there's no way to ask
+  "and what about Starter?" as a follow-up to a previous answer.
+- **No caching, and ingestion always rebuilds from scratch.** Fine at ~120 chunks; not fine at
+  scale — see Production thinking below.
+- **No auth, no rate limiting, no multi-tenancy.** This is a single-user local POC, not
+  something you'd point the internet at.
 
 ## The five weaknesses that concern me most
 
-1. **The conflict registry is a list of two document IDs I typed by hand.** It works for this
-   corpus because I read all 13 documents myself. It cannot discover a conflict I didn't
-   already know about, and it does not generalize past this specific pair. Before real users
-   see this, I'd replace it with an LLM-as-judge pass that checks whether any two co-retrieved,
-   high-scoring chunks assert incompatible facts about the same entity - much more compute per
-   query, but it doesn't require me to have pre-read the corpus.
-2. **The ambiguity heuristic (score spread + section count) will both false-positive and
-   false-negative on corpora it wasn't hand-tuned against.** A question that's genuinely
-   specific but happens to retrieve chunks from several sections at similar scores would
-   wrongly get a clarifying question instead of an answer. I'd want a labelled set of
-   ambiguous vs. unambiguous questions to tune the thresholds against, which this take-home
-   didn't have time to build.
-3. **`OutputGuard`'s known-phrase list is reactive, not proactive** - it only catches the
-   exact three payloads in this exact corpus. A differently-worded injected instruction that
-   still successfully steers the model would ship undetected. This needs a real classifier (or
-   an LLM-judge pass comparing the answer against the *un-sanitized* retrieved context for
-   suspicious divergence), not a string list.
-4. **Similarity-threshold-based "insufficient evidence" detection is a single global number**
-   (`SIMILARITY_THRESHOLD` in `.env`). Different question types plausibly need different
-   thresholds - a yes/no question and an open-ended "summarise X" question don't have
-   comparable score distributions at the same top-k. Right now one threshold has to work for
-   both, which is a source of both over- and under-refusal I haven't rigorously measured.
-5. **No caching and no batching.** Every query re-embeds the question and makes one full LLM
-   call; ingestion re-embeds every chunk from scratch on every run (`vector_store.reset()`
-   deliberately drops and rebuilds the whole collection). Fine at 125 chunks; not fine at
-   10,000 documents - see Production thinking below.
+I wrote a first draft of this list before I'd actually run the system against a live model.
+Since then I ran it — repeatedly, chasing down specific wrong answers — and most of these
+predictions held up, with real evidence behind them now instead of guesses. A couple of things
+below (the Q4 retrieval bug, the invented "System Prompt:" header) I genuinely didn't see coming
+until I watched the model actually do them.
 
-## What I deliberately chose not to build, and why
+**1. Q4's wrong answer turned out to be a retrieval bug, and I only partly fixed it.**
+Early on, this system confidently answered "SAR 95" for the Atlas Professional plan price — that's
+the *per-additional-user* price, not the plan price (SAR 5,200). The root cause was that the
+"subscription plans" table and the "additional users" table were two separate chunks with
+similar content, and the embedding model ranked the wrong one first for this exact phrasing. I
+tried three separate fixes: reranking, hybrid keyword+semantic search, and finally merging the
+two tables into a single chunk so there was nothing left to rank between. The third one worked —
+Q4 now answers correctly and consistently. What I haven't verified is whether the same class of
+problem exists anywhere else in the corpus I haven't specifically tested; I fixed the instance I
+found, not the general failure mode.
 
-- **Hybrid (keyword + semantic) search.** Explicitly optional in the assignment. At 125
-  chunks, semantic search alone retrieves cleanly - no precision problem here that a keyword
-  signal would visibly fix.
-- **A dedicated cross-encoder reranking model** (rather than the LLM-based reranker actually
-  built - see WALKTHROUGH.md). A cross-encoder needs `sentence-transformers`/PyTorch, a heavy
-  dependency this project otherwise avoids entirely by using Ollama for both chat and
-  embeddings; reusing the already-running chat model keeps the install footprint to "just
-  Ollama" at the cost of one extra LLM round-trip per query.
-- **A confidence score attached to each answer.** I considered exposing the top chunk's
-  similarity score as a "confidence" number, but a raw cosine similarity is not a calibrated
-  probability of correctness, and presenting it as one would be more misleading than useful.
-  The `EvidenceOutcome` classification (sufficient/insufficient/conflicting/ambiguous) is the
-  honest version of this signal - it's discrete and each state has a defined behaviour instead
-  of a number the user has to guess a threshold for.
-- **Conversation memory / multi-turn state.** Out of scope for the assignment's test
-  questions, all single-turn, and adding it correctly (deciding what carries over between
-  turns, especially for the ambiguity-clarification flow) is a bigger design problem than this
-  take-home's scope justified.
-- **A general-purpose ML-based prompt-injection classifier.** Regex/keyword matching
-  (`InputClassifier`) is auditable and fast, and sufficient for the three known injection
-  vectors in this corpus plus the two required test questions (Q9, Q10). Training or hosting a
-  real classifier model for a 13-document POC would be disproportionate effort - flagged
-  instead as the first thing to add before this sees a corpus I haven't personally read.
+**2. The small model sometimes reasons its way to the wrong number, and I can't fully fix that
+with prompting.** Q3 asks for an annual-leave calculation spanning a partial month, and the
+correct answer (14 working days) depends on applying a specific rule from HR-PRO-011 about when
+a partial month counts as complete. Across several live runs, the model has computed 8, 12, and
+other wrong numbers — always confidently, always with a plausible-looking chain of reasoning
+that just doesn't apply the rule correctly. I added an explicit "work through calculations step
+by step, quoting the rule for each step" instruction to the system prompt. It didn't fix this
+one. I also tried a larger model (`qwen2.5:7b-instruct`) as an experiment — same wrong answer,
+different specific mistake. I'm treating this as a real capability ceiling for models at this
+scale, not something a config change or a better prompt gets me past.
 
-## Evaluation methodology (beyond the 15-question run)
+**3. The model sometimes invents its own fake "system prompt" heading, and I had to add a
+code-level filter to catch it, because the prompt instruction alone didn't reliably work.** On
+Q5, I saw the model's answer literally start with the words "System Prompt:" — not because it
+leaked anything real (it hadn't), but because it seems to like decorating structured answers
+with report-style headers, and picked that one. I told it explicitly, twice, in two separate
+prompt revisions, not to do this. It still did it a second time after the first fix. What
+actually works is a small regex in `OutputGuard` that strips a leading line matching that
+pattern before the answer goes out. I'm noting this because it's a good example of where a 3B
+model's instruction-following just isn't reliable enough to trust on its own — you need a
+mechanical backstop, not just a better-worded rule.
 
-See `evaluation/results.md` for the full write-up. Summary: a gold retrieval set (question ->
-expected document IDs) for recall@k/MRR, an LLM-as-judge entailment check for hallucination
-detection at scale, and outcome-classification diffing (not raw text diffing) between versions
-for regression detection, since raw generated text legitimately varies run to run even at low
-temperature.
+**4. The conflict-detection registry can trigger on the wrong grounds, and I had to add a
+confidence gate to fix it.** I found this by accident while debugging Q4: an unrelated pricing
+question happened to also retrieve a chunk from LEG-TRM-004 (its refund table mentions "Atlas
+Professional" as a row label), and because LEG-TRM-004 and SUP-FAQ-001 are my known conflicting
+pair, this alone triggered a false CONFLICTING classification for a question that had nothing to
+do with refunds. The fix — requiring both documents in a known pair to be *confidently* matched,
+not just present somewhere above the relevance threshold — was validated against real retrieval
+scores (0.784/0.763 for the genuine conflict, 0.664 for the false trigger), but it's still a
+threshold I picked, not a principled distinction, and a different corpus could need a different
+number.
 
-## Production thinking: what would break, and where
+**5. The similarity threshold is one global number covering every kind of question,** and it's
+had to be moved once already after a live run showed it was wrong: a completely unrelated
+question ("what was the company's revenue in 2025") scored 0.61 against nothing but document
+headers, comfortably clearing the original 0.35 cutoff and triggering a false answer instead of
+"I don't know." I raised it to 0.62 based on that specific evidence, but a yes/no question and an
+open-ended "summarise X" question don't produce comparable score distributions at the same
+top-k, and one number is being asked to work for both.
 
-- **At 10 million documents**: the embedded, single-process Chroma store stops being
-  appropriate - you'd need a proper vector database service (Qdrant, pgvector, or managed
-  Chroma) with sharding, and re-embedding the whole collection on every ingest
-  (`vector_store.reset()`) becomes infeasible; ingestion would need to become incremental
-  (diff against what's already indexed) rather than "wipe and rebuild."
-- **At thousands of concurrent users**: `OllamaChatClient`/`OllamaEmbedder` make one
-  synchronous HTTP call per request against a single local Ollama process - that's a hard
-  ceiling on throughput. A production deployment needs a batching/queueing layer in front of
-  the model server (or a hosted inference endpoint that scales horizontally) and the FastAPI
-  layer would need to go async end to end.
-- **Under strict latency limits**: the current design does one embedding call, one reranking
-  LLM call, and one generation LLM call per query, serially. The evidence-analyzer logic
-  itself is cheap, but the two LLM calls dominate - a latency-constrained deployment would need
-  a smaller/faster model, response streaming, disabling reranking (`RERANK_ENABLED=false`), or
-  a real cross-encoder reranker (much cheaper per call than an LLM completion), or some
-  combination of these.
-- **Under strict cost limits**: local Ollama has no per-token cost, which is exactly why this
-  POC uses it - but a production system serving many users would likely need a hosted
-  open-weight endpoint, at which point token cost reappears and argues for tighter context
-  (better top-k tuning, reranking to cut the number of chunks sent per call) rather than
-  "retrieve generously and let the model sort it out."
+**What I'd change before this saw real users**: replace the hand-typed conflict registry with an
+LLM-as-judge pass that checks whether any two co-retrieved, high-scoring chunks actually assert
+incompatible facts — much more expensive per query, but it doesn't require me to have personally
+read the whole corpus first, which is the real limit of what's here today.
+
+## What I deliberately didn't build
+
+- **A real cross-encoder reranker**, as opposed to the LLM-based one I actually built. A
+  cross-encoder needs `sentence-transformers` and PyTorch — a heavy dependency this project
+  otherwise avoids by using Ollama for everything. Reusing the chat model I already had running
+  kept the install to "just Ollama," at the cost of one extra round-trip per query when
+  reranking is on.
+- **Conversation memory.** Every test question is single-turn, and doing multi-turn state
+  properly — deciding what carries over, especially through an ambiguity-clarification exchange
+  — is a bigger design problem than this take-home called for.
+- **A trained prompt-injection classifier.** The keyword/pattern-based one I built is auditable,
+  fast, and enough for the three injection vectors actually in this corpus plus the two required
+  test questions. Training or hosting a real classifier for a 13-document POC would be a lot of
+  effort for very little payoff here — it's the first thing I'd build before pointing this at a
+  corpus I hadn't read myself.
+
+
+## Production thinking
+
+- **At 10 million documents**, the embedded single-process Chroma store is the wrong tool —
+  you'd need a real vector database service with sharding, and "wipe and rebuild the whole
+  collection on every ingest" (which is what this does today) stops being feasible; ingestion
+  would need to become incremental.
+- **At thousands of concurrent users**, one synchronous HTTP call per request against a single
+  local Ollama process is a hard ceiling. You'd need a batching/queueing layer in front of the
+  model, or a hosted inference endpoint that actually scales out, and the FastAPI layer would
+  need to go fully async.
+- **Under a tight latency budget**, the two LLM calls per query (reranking, if on, plus
+  generation) are what dominate — you'd want a smaller/faster model, streaming responses, or a
+  real cross-encoder reranker instead of an LLM-based one.
+- **Under a tight cost budget**, local Ollama is free per token, which is exactly why it's here
+  — but a hosted endpoint serving real users brings token cost back into the picture, which
+  argues for tighter context (better top-k tuning, real reranking to cut what gets sent) instead
+  of the "retrieve generously and let the model sort it out" approach this POC takes.
 
 ## One closing thought
 
-What would worry me first about deploying this to a real enterprise tomorrow is not the
-happy-path retrieval - it's that every safety behaviour in this system (the conflict registry,
-the injection phrase list, the ambiguity thresholds) was tuned by a person who read all 13
-source documents in advance. A real corpus is never fully read by anyone, updates continuously,
-and will contain conflicts, injected instructions, and ambiguous terminology I never
-anticipated. The honest failure mode of this architecture isn't that it hallucinates on the
-happy path - it's that it will confidently give a clean, well-cited, SUFFICIENT-classified
-answer to a question whose true answer was actually CONFLICTING or INSUFFICIENT, simply
-because nothing in this design detects problems it wasn't specifically built to look for.
-That gap between "handles the traps I knew about" and "handles the traps I didn't" is the
-real production risk, and closing it needs the general-purpose detectors called out above,
-not more corpus-specific tuning.
+If this went in front of a real enterprise tomorrow, the thing that would worry me first isn't
+the happy path — it's that every safety mechanism in here (the conflict list, the injection
+phrase checks, the ambiguity thresholds) was tuned by someone who'd personally read all 13
+source documents in advance. A real corpus is never fully read by anyone, it changes constantly,
+and it will contain conflicts and ambiguous terms I never anticipated and never tuned for. This
+system's real failure mode isn't that it hallucinates on an easy question — it's that it will
+give a clean, confident, well-cited answer to a question whose true answer was actually
+conflicting or unclear, simply because nothing here was built to notice a problem it wasn't
+specifically looking for. Closing that gap needs the general-purpose detectors I described
+above, not more tuning aimed at the traps I already know about.

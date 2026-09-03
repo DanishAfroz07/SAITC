@@ -42,11 +42,28 @@ class EvidenceOutcome(str, Enum):
     AMBIGUOUS = "ambiguous"
 
 
+class RetrievalConfidence(str, Enum):
+    """How strongly the retrieved evidence matched the question - NOT a
+    probability that the generated answer is factually correct. Only
+    meaningful when the system actually commits to one answer (SUFFICIENT);
+    every other outcome is NOT_APPLICABLE by definition, since the whole
+    point of those outcomes is that the system isn't confidently picking one
+    answer. See README for a real example where this is HIGH and the answer
+    is still wrong - retrieval finding the right passage and the model
+    reasoning about it correctly are two different things."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    NOT_APPLICABLE = "not_applicable"
+
+
 @dataclass
 class EvidenceAssessment:
     outcome: EvidenceOutcome
     chunks: list[RetrievedChunk]
     reason: str
+    retrieval_confidence: RetrievalConfidence = RetrievalConfidence.NOT_APPLICABLE
 
 
 @dataclass(frozen=True)
@@ -61,6 +78,7 @@ class Answer:
     text: str
     citations: list[Citation]
     outcome: EvidenceOutcome
+    retrieval_confidence: RetrievalConfidence = RetrievalConfidence.NOT_APPLICABLE
 
 
 class InputVerdict(str, Enum):

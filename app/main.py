@@ -15,6 +15,7 @@ from fastapi import FastAPI
 
 from app.api.controllers import document_controller, health_controller, ingest_controller, query_controller
 from app.config import settings
+from app.models import RetrievalConfidence
 from app.wiring import build_ingestion_pipeline, build_rag_pipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -54,6 +55,8 @@ def _run_chat() -> None:
         if answer.citations:
             sources = ", ".join(f"[{c.document_id}]" for c in answer.citations)
             print(f"\nSources: {sources}")
+        if answer.retrieval_confidence is not RetrievalConfidence.NOT_APPLICABLE:
+            print(f"Retrieval confidence: {answer.retrieval_confidence.value}")
 
 
 def main() -> None:

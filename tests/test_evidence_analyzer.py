@@ -1,6 +1,6 @@
 from datetime import date
 
-from app.models import Chunk, DocumentMetadata, EvidenceOutcome, RetrievedChunk
+from app.models import Chunk, DocumentMetadata, EvidenceOutcome, RetrievalConfidence, RetrievedChunk
 from app.retrieval.evidence_analyzer import EvidenceAnalyzer
 
 
@@ -70,3 +70,82 @@ def test_superseded_chunks_are_excluded_from_ambiguity_check():
     analyzer = EvidenceAnalyzer(similarity_threshold=0.3, ambiguity_margin=0.5)
     result = analyzer.assess(chunks)
     assert result.outcome == EvidenceOutcome.SUFFICIENT
+
+
+def test_low_confidence_conflict_pair_member_does_not_falsely_trigger_conflicting():
+    # Regression test for a real bug (assignment Q4): an unrelated pricing
+    # question incidentally retrieved LEG-TRM-004 (its refund table happens
+    # to mention "Atlas Professional" as a row label) at a low, marginal
+    # score, while the real conflict-pair partner SUP-FAQ-001 wasn't
+    # retrieved with any real confidence either. That must not be enough to
+    # trigger CONFLICTING - only a genuinely confident match on both members
+    # of a known conflict pair should (see test_known_conflict_pair_is_flagged,
+    # where both score 0.75+).
+    chunks = [
+        _rc("SALES-PL-2026", "1. Subscription plans and additional users", 0.74),
+        _rc("SALES-PL-2025", "1. Subscription plans and additional users", 0.73),
+        _rc("SUP-FAQ-001", "Q: What does Atlas Professional cost?", 0.71),
+        _rc("LEG-TRM-004", "2. Refund windows by plan", 0.664),  # incidental, low-confidence
+    ]
+    analyzer = EvidenceAnalyzer(similarity_threshold=0.62, ambiguity_margin=0.05, conflict_confidence_threshold=0.70)
+    result = analyzer.assess(chunks)
+    assert result.outcome != EvidenceOutcome.CONFLICTING
+
+
+def test_sufficient_high_score_gets_high_confidence():
+    analyzer = EvidenceAnalyzer(
+        similarity_threshold=0.3, ambiguity_margin=0.05, high_confidence_score=0.78, medium_confidence_score=0.68
+    )
+    result = analyzer.assess([_rc("HR-POL-002", "4.2 Annual leave entitlement", 0.9)])
+    assert result.outcome == EvidenceOutcome.SUFFICIENT
+    assert result.retrieval_confidence == RetrievalConfidence.HIGH
+
+
+def test_sufficient_middling_score_gets_medium_confidence():
+    analyzer = EvidenceAnalyzer(
+        similarity_threshold=0.3, ambiguity_margin=0.05, high_confidence_score=0.78, medium_confidence_score=0.68
+    )
+    result = analyzer.assess([_rc("HR-POL-002", "4.2 Annual leave entitlement", 0.70)])
+    assert result.retrieval_confidence == RetrievalConfidence.MEDIUM
+
+
+def test_sufficient_low_score_gets_low_confidence():
+    analyzer = EvidenceAnalyzer(
+        similarity_threshold=0.3, ambiguity_margin=0.05, high_confidence_score=0.78, medium_confidence_score=0.68
+    )
+    result = analyzer.assess([_rc("HR-POL-002", "4.2 Annual leave entitlement", 0.5)])
+    assert result.retrieval_confidence == RetrievalConfidence.LOW
+
+
+def test_non_sufficient_outcomes_have_not_applicable_confidence():
+    # INSUFFICIENT: nothing cleared the threshold at all.
+    analyzer = EvidenceAnalyzer(similarity_threshold=0.5, ambiguity_margin=0.05)
+    result = analyzer.assess([_rc("A", "1. X", 0.2)])
+    assert result.outcome == EvidenceOutcome.INSUFFICIENT
+    assert result.retrieval_confidence == RetrievalConfidence.NOT_APPLICABLE
+
+    # CONFLICTING: a confidence number would contradict the point of this
+    # outcome - the system isn't committing to one answer here.
+    analyzer = EvidenceAnalyzer(similarity_threshold=0.3, ambiguity_margin=0.05)
+    chunks = [_rc("LEG-TRM-004", "2. Refund windows by plan", 0.8), _rc("SUP-FAQ-001", "Plans and billing", 0.75)]
+    result = analyzer.assess(chunks)
+    assert result.outcome == EvidenceOutcome.CONFLICTING
+    assert result.retrieval_confidence == RetrievalConfidence.NOT_APPLICABLE
+
+
+def test_superseded_chunk_still_reaches_generation_in_sufficient_case():
+    # Regression test for a real bug: a dated-supersession case (e.g.
+    # SALES-PL-2025 -> SALES-PL-2026) must still show the model the OLD
+    # value, tagged superseded, so it can explain the price/term changed -
+    # not silently vanish before generation ever sees it (assignment Q4).
+    old = _rc("SALES-PL-2025", "1. Subscription plans", 0.7)
+    old.chunk.superseded = True
+    new = _rc("SALES-PL-2026", "1. Subscription plans", 0.75)
+
+    analyzer = EvidenceAnalyzer(similarity_threshold=0.3, ambiguity_margin=0.05)
+    result = analyzer.assess([old, new])
+
+    assert result.outcome == EvidenceOutcome.SUFFICIENT
+    assert len(result.chunks) == 2
+    doc_ids = {c.chunk.document_id for c in result.chunks}
+    assert doc_ids == {"SALES-PL-2025", "SALES-PL-2026"}

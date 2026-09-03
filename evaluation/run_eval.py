@@ -31,6 +31,7 @@ def main() -> None:
                 "question": item["question"],
                 "answer": answer.text,
                 "outcome": answer.outcome.value,
+                "retrieval_confidence": answer.retrieval_confidence.value,
                 "citations": [c.document_id for c in answer.citations],
                 "elapsed_seconds": round(elapsed, 2),
             }
@@ -39,11 +40,15 @@ def main() -> None:
 
     RESULTS_JSON_PATH.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
-    lines = ["| # | Question | Outcome | Citations | Answer |", "|---|---|---|---|---|"]
+    lines = [
+        "| # | Question | Outcome | Confidence | Citations | Answer |",
+        "|---|---|---|---|---|---|",
+    ]
     for r in results:
         answer_preview = r["answer"].replace("\n", " ").replace("|", "/")[:220]
         lines.append(
-            f"| {r['id']} | {r['question']} | {r['outcome']} | {', '.join(r['citations'])} | {answer_preview} |"
+            f"| {r['id']} | {r['question']} | {r['outcome']} | {r['retrieval_confidence']} | "
+            f"{', '.join(r['citations'])} | {answer_preview} |"
         )
     RESULTS_MD_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\nWrote {RESULTS_JSON_PATH} and {RESULTS_MD_PATH}")

@@ -22,4 +22,9 @@ class AnswerGenerator:
         messages = build_messages(query, assessment)
         text = self._chat_client.complete(messages)
         citations = _build_citations(assessment.chunks)
-        return Answer(text=text, citations=citations, outcome=assessment.outcome)
+        return Answer(
+            text=text,
+            citations=citations,
+            outcome=assessment.outcome,
+            retrieval_confidence=assessment.retrieval_confidence,
+        )
