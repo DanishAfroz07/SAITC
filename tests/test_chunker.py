@@ -72,3 +72,27 @@ def test_stray_blank_line_inside_a_table_does_not_split_it():
     assert len(table_chunks) == 1
     assert "Service | Price" in table_chunks[0].text
     assert "Data migration" in table_chunks[0].text
+
+
+def test_table_row_starting_with_a_number_is_not_misread_as_a_heading():
+    # Regression test for a real bug found by tracing HR-PRO-011's
+    # partial-month rule through the pipeline: a table row like "15 calendar
+    # days or more | Counts as..." matches the numbered-heading pattern
+    # (digits, whitespace, text) just as well as a genuine heading like
+    # "4.2 Annual leave entitlement" does. Without excluding table rows,
+    # such a row got misread as starting a new section, silently truncating
+    # the table at exactly that row. Also affected HR-POL-002 ("5 years or
+    # more | ...") and FIN-POL-007 ("6 hours or more | ...") in the real
+    # corpus.
+    text = (
+        "4. Treatment of partial months\n"
+        "A period of service that does not make up a whole month is treated as follows.\n"
+        "Days served in the partial month | Treatment\n"
+        "15 calendar days or more | Counts as one completed month, full accrual granted\n"
+        "Fewer than 15 calendar days | Disregarded, no accrual granted for that month\n"
+    )
+    chunks = SectionChunker(max_chars=1000).chunk(text, METADATA)
+    table_chunks = [c for c in chunks if c.is_table]
+    assert len(table_chunks) == 1
+    assert "15 calendar days or more" in table_chunks[0].text
+    assert "Fewer than 15 calendar days" in table_chunks[0].text

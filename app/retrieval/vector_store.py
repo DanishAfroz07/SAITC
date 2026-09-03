@@ -71,6 +71,36 @@ class ChromaVectorStore:
         result = self._collection.query(query_embeddings=[query_embedding], n_results=top_k)
         return self._to_retrieved_chunks(result)
 
+    def get_all_chunks(self) -> list[Chunk]:
+        """Every chunk in the collection, no embedding call needed - used to
+        build the lexical (BM25) index for hybrid search."""
+        result = self._collection.get()
+        return [
+            self._chunk_from_parts(chunk_id, text, meta)
+            for chunk_id, text, meta in zip(result["ids"], result["documents"], result["metadatas"])
+        ]
+
+    @staticmethod
+    def _chunk_from_parts(chunk_id: str, text: str, meta: dict) -> Chunk:
+        metadata = DocumentMetadata(
+            document_id=meta["document_id"],
+            title=meta["title"],
+            version=meta["version"],
+            effective_date=date.fromisoformat(meta["effective_date"]),
+            owner=meta["owner"],
+            classification=meta["classification"],
+            supersedes=meta["supersedes"] or None,
+            file_name=meta["file_name"],
+        )
+        return Chunk(
+            chunk_id=chunk_id,
+            document_id=meta["document_id"],
+            section=meta["section"],
+            text=text,
+            is_table=meta["is_table"],
+            metadata=metadata,
+        )
+
     @staticmethod
     def _to_metadata_dict(chunk: Chunk) -> dict:
         m = chunk.metadata
@@ -92,31 +122,14 @@ class ChromaVectorStore:
         if not result["ids"] or not result["ids"][0]:
             return []
 
-        retrieved: list[RetrievedChunk] = []
         ids = result["ids"][0]
         documents = result["documents"][0]
         metadatas = result["metadatas"][0]
         distances = result["distances"][0]
 
+        retrieved: list[RetrievedChunk] = []
         for chunk_id, text, meta, distance in zip(ids, documents, metadatas, distances):
-            metadata = DocumentMetadata(
-                document_id=meta["document_id"],
-                title=meta["title"],
-                version=meta["version"],
-                effective_date=date.fromisoformat(meta["effective_date"]),
-                owner=meta["owner"],
-                classification=meta["classification"],
-                supersedes=meta["supersedes"] or None,
-                file_name=meta["file_name"],
-            )
-            chunk = Chunk(
-                chunk_id=chunk_id,
-                document_id=meta["document_id"],
-                section=meta["section"],
-                text=text,
-                is_table=meta["is_table"],
-                metadata=metadata,
-            )
+            chunk = cls._chunk_from_parts(chunk_id, text, meta)
             # Chroma's cosine "distance" is (1 - similarity); invert it back.
             retrieved.append(RetrievedChunk(chunk=chunk, score=1.0 - distance))
         return retrieved

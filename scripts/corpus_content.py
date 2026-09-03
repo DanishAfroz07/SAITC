@@ -580,24 +580,23 @@ records the interim arrangement rather than leaving the entry blank. Roles that 
 currently exist within the company are not listed.
 """
 
-_BODIES["SALES-PL-2025"] = """1. Subscription plans
+_BODIES["SALES-PL-2025"] = """1. Subscription plans and additional users
 The following list prices apply to new subscriptions and to renewals falling due on or after
 the effective date shown above. Prices are per organisation per month and are billed annually
-in advance unless otherwise agreed.
+in advance unless otherwise agreed. The table below shows both the base monthly plan price
+and the separate price charged per additional user beyond the plan's included user count.
 
 Plan | Monthly list price | Included users | Included storage
 Atlas Starter | SAR 1,200 | Up to 10 | 50 GB
 Atlas Professional | SAR 4,500 | Up to 50 | 500 GB
 Atlas Enterprise | Priced individually | Unlimited | From 2 TB
 
-2. Additional users
-
 Plan | Price per additional user per month
 Atlas Starter | SAR 95
 Atlas Professional | SAR 80
 Atlas Enterprise | Per contract
 
-3. Optional modules
+2. Optional modules
 
 Module | Monthly price | Available on
 Advanced Analytics | SAR 900 | Professional, Enterprise
@@ -605,13 +604,13 @@ Audit and Compliance Pack | SAR 1,100 | Professional, Enterprise
 Single Sign-On, SAML | SAR 400 | All plans
 Priority Support | SAR 1,500 | Starter, Professional
 
-4. Discounts
+3. Discounts
 Annual prepayment: 10% discount on the subscription component. Two-year commitment: 15%
 discount on the subscription component. Registered non-profit organisations: 20% discount,
 subject to verification. Discounts are not cumulative; where more than one applies, the
 larger is used.
 
-5. Implementation and services
+4. Implementation and services
 
 Service | Price
 Standard onboarding, remote, up to 8 hours | Included
@@ -619,34 +618,33 @@ Extended onboarding, on site | SAR 12,000 per engagement
 Data migration from a supported system | SAR 8,500 per source system
 Custom integration development | SAR 750 per hour
 
-6. Terms
+5. Terms
 All prices exclude VAT, applied at the prevailing rate. Prices are reviewed annually.
 Existing customers are given 60 days written notice of any price change affecting their
 renewal. Refunds and cancellations are governed by the applicable customer terms.
 """
 
-_BODIES["SALES-PL-2026"] = """1. Subscription plans
+_BODIES["SALES-PL-2026"] = """1. Subscription plans and additional users
 The following list prices apply to new subscriptions and to renewals falling due on or after
 the effective date shown above. Prices are per organisation per month and are billed annually
-in advance unless otherwise agreed.
+in advance unless otherwise agreed. The table below shows both the base monthly plan price
+and the separate price charged per additional user beyond the plan's included user count.
 
 Plan | Monthly list price | Included users | Included storage
 Atlas Starter | SAR 1,400 | Up to 10 | 100 GB
 Atlas Professional | SAR 5,200 | Up to 50 | 500 GB
 Atlas Enterprise | From SAR 18,000 | Unlimited | From 2 TB
 
-Change note: subscription prices increased at this revision following the annual review.
-Customers on an active term retain their contracted price until renewal. The Atlas Enterprise
-plan now carries a published entry price rather than being priced individually in every case.
-
-2. Additional users
-
 Plan | Price per additional user per month
 Atlas Starter | SAR 110
 Atlas Professional | SAR 95
 Atlas Enterprise | Per contract
 
-3. Optional modules
+Change note: subscription prices increased at this revision following the annual review.
+Customers on an active term retain their contracted price until renewal. The Atlas Enterprise
+plan now carries a published entry price rather than being priced individually in every case.
+
+2. Optional modules
 
 Module | Monthly price | Available on
 Advanced Analytics | SAR 1,050 | Professional, Enterprise
@@ -655,13 +653,13 @@ Single Sign-On, SAML | Included | All plans
 Priority Support | SAR 1,700 | Starter, Professional
 Regional Data Residency | SAR 2,400 | Enterprise
 
-4. Discounts
+3. Discounts
 Annual prepayment: 10% discount on the subscription component. Two-year commitment: 15%
 discount on the subscription component. Registered non-profit organisations: 20% discount,
 subject to verification. Discounts are not cumulative; where more than one applies, the
 larger is used.
 
-5. Implementation and services
+4. Implementation and services
 
 Service | Price
 Standard onboarding, remote, up to 8 hours | Included
@@ -669,7 +667,7 @@ Extended onboarding, on site | SAR 14,000 per engagement
 Data migration from a supported system | SAR 9,500 per source system
 Custom integration development | SAR 850 per hour
 
-6. Terms
+5. Terms
 All prices exclude VAT, applied at the prevailing rate. Prices are reviewed annually.
 Existing customers are given 60 days written notice of any price change affecting their
 renewal. Refunds and cancellations are governed by the applicable customer terms, which

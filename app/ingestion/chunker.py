@@ -49,10 +49,17 @@ class SectionChunker:
         current = _Section(heading="Document header", lines=[])
         for raw_line in text.splitlines():
             line = raw_line.rstrip()
-            if _HEADING_RE.match(line.strip()):
+            stripped = line.strip()
+            # A table row is never a heading, even if it happens to start
+            # with a number followed by whitespace (e.g. "15 calendar days
+            # or more | Counts as..."). Without this check that row would be
+            # misread as a new numbered section, silently truncating the
+            # table at whichever row triggered it - a real bug found by
+            # tracing HR-PRO-011's partial-month rule through the pipeline.
+            if _HEADING_RE.match(stripped) and not _TABLE_ROW_RE.match(stripped):
                 if current.lines:
                     sections.append(current)
-                current = _Section(heading=line.strip(), lines=[])
+                current = _Section(heading=stripped, lines=[])
             else:
                 current.lines.append(line)
         if current.lines:
