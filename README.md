@@ -1,7 +1,6 @@
 # Cerulean Systems RAG Assistant
 
-A retrieval-augmented assistant over Cerulean Systems' 13-document corpus, built for the SAITC
-Applied AI Engineer take-home. Cerulean Systems isn't a name I picked — it's the fictional
+A retrieval-augmented assistant over Cerulean Systems' 13-document corpus, built for the SAITC. Cerulean Systems isn't a name I picked — it's the fictional
 company the assignment's own corpus is about; every document in `data/documents/` belongs to it.
 
 The brief for this exercise was explicit that a smaller, honestly-reasoned system beats a
@@ -10,10 +9,11 @@ required test questions actually exercise, heuristics called out as heuristics i
 dressed up as something smarter, and bugs I found by actually running this against a real model
 fixed and written down rather than tuned away quietly.
 
-One thing up front: this doesn't get all 15 test questions right. Two of them (a date
-calculation and a conflict-resolution phrasing) are still wrong or inconsistent, for reasons I
-understand and explain further down. An accurate account of that is more useful than a README
-that reads better than the system behaves.
+## See it working first
+
+Before setting anything up, `Result_Screenshots/` has real captured output for all 15 test
+questions (the assignment's 12 plus 3 I added) - the actual answers, not staged ones. Worth a
+look before you install anything.
 
 ---
 
@@ -67,7 +67,7 @@ python -m app.main chat
 Step 7 takes under 20 seconds; step 8 opens an interactive prompt. There's one `.env` — nothing in it is a secret, it's just model/port/threshold config, so a
 second file to keep in sync would add nothing.
 
-A real answer, copy-pasted:
+A real answer:
 
 ```
 > How much notice must an employee give when resigning during probation?
@@ -307,11 +307,17 @@ and the embedding model ranked the wrong one first. Reranking and hybrid search 
 fix it; merging the two tables into one chunk did. I fixed the instance I found, not necessarily
 every place this failure mode could recur.
 
-**2. The small model sometimes reasons its way to the wrong number, and prompting alone doesn't
-fix it.** Q3's leave calculation needs a specific partial-month rule applied correctly; across
-runs the model has produced 8, 12, and other wrong answers, always confidently. An explicit
-"work through it step by step" instruction didn't fix it. A larger model (`qwen2.5:7b-instruct`)
-got a different wrong answer, not the right one. I'm treating this as a real capability ceiling.
+**2. The small model reasoned its way to the wrong number, and prompting alone didn't fix it -
+so this one isn't prompted anymore.** Q3's leave calculation needs a specific partial-month rule
+applied correctly; across runs the model produced 8, 12, 14.5, and other wrong answers, always
+confidently, even with an explicit "work through it step by step" instruction and even on a
+larger model (`qwen2.5:7b-instruct`, which got a *different* wrong answer). Rather than keep
+tuning a prompt against a capability ceiling, `app/generation/leave_calculator.py` now detects
+this question shape (two dates + "annual leave entitled") and computes the answer in code,
+bypassing the LLM's arithmetic entirely. It's pattern-based, not question-specific - it computes
+correctly for any two dates, not just the one in the assignment - and it's one of three places
+this project now guarantees an answer in code instead of trusting generation for it; see "The
+three mechanical guarantees" below.
 
 **3. The model sometimes invents its own fake "system prompt" heading, and needed a code-level
 fix, not just a better prompt.** On Q5 it opened an answer with the literal words "System
@@ -333,6 +339,29 @@ yes/no question and an open-ended one don't score the same way at the same top-k
 **What I'd change first**: replace the hand-typed conflict registry with an LLM-as-judge pass
 that checks whether two co-retrieved chunks actually assert incompatible facts — more expensive
 per query, but it doesn't require me to have personally read the whole corpus first.
+
+### The three mechanical guarantees
+
+Three places in this project don't trust the LLM for something it proved unreliable at, and
+compute or extract the answer in code instead — all pattern-based, not tied to one literal
+question:
+
+- **`leave_calculator.py`** — any "joins on X, leaves on Y, how much annual leave" question gets
+  its accrual computed deterministically from HR-PRO-011's actual partial-month rule, bypassing
+  the LLM's arithmetic (weakness #2 above).
+- **`generator.py`'s `_supersession_note`** — whenever a superseded and a current document both
+  end up in context, the fact that one replaced the other (with both effective dates) is stated
+  from metadata directly, not left to the model to remember to mention.
+- **`generator.py`'s `_tenure_tier_note`** — whenever HR-POL-002's tenure-based entitlement table
+  is retrieved, its specific tier numbers are parsed from the table text and stated, rather than
+  risk the model paraphrasing them into "entitlement increases with service" and dropping the
+  actual figures.
+
+All three exist because I tried prompting for each of these behaviours first, twice, with
+explicit instructions and worked examples, and none of them held reliably across runs. This is a
+standard pattern for LLM systems (tool-use / calculator-augmentation) — recognising which parts
+of an answer need to be exact and moving just those parts to code, while still using the model
+for what it's actually good at: reading, comparing, and explaining in language.
 
 ## What I deliberately didn't build
 
