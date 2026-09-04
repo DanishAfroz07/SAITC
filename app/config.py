@@ -33,15 +33,21 @@ class Settings(BaseSettings):
     # verified to exclude that noise while still keeping every genuinely
     # relevant chunk seen in testing. See README.md.
     similarity_threshold: float = 0.62
-    ambiguity_margin: float = 0.03
-    # Also evidence-based: at 3, this false-triggered AMBIGUOUS on broad but
-    # perfectly answerable questions ("What is the annual leave policy?"),
-    # because one document's several sections (entitlement, accrual, carry-
-    # over) look like "multiple sections" even though they're all facets of
-    # one coherent answer, not competing candidates the way PROD-DOC-009's
-    # distinct limit types genuinely are. Raised until that stopped
-    # happening in live testing.
-    ambiguity_min_sections: int = 5
+    # This counts distinct top-level sections WITHIN A SINGLE DOCUMENT (see
+    # EvidenceAnalyzer._top_level_section) - a global count across documents
+    # used to false-trigger on "What is the annual leave policy?" because
+    # its supporting cross-references (HR-PRO-011, HR-POL-005) added to the
+    # section count even though they support one coherent answer, not
+    # compete with it. Grouping per-document instead lets this stay low: 2
+    # is enough to catch Q8 (PROD-DOC-009's rate-limit vs storage-limit
+    # sections) without that false positive - verified live, see README.md.
+    ambiguity_min_sections: int = 2
+    # A document's section-diversity alone can't tell "genuinely different
+    # kinds of thing" (Q8) apart from "different facets of one topic"
+    # (Q12's FIN-POL-007 sections, all "travel booking rules") - both look
+    # identical in shape. What differs is the QUESTION: Q8 is 4 words with
+    # no qualifying noun; Q12 is 11 words that already name what's wanted.
+    ambiguity_max_query_words: int = 5
     # Evidence-based: a genuine conflict pair scored 0.784/0.763 live, while
     # an unrelated question's incidental co-retrieval of one conflict-pair
     # member scored only 0.664 - enough to falsely trigger CONFLICTING

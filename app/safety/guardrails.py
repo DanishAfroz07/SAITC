@@ -27,9 +27,11 @@ _SAFE_REPLACEMENT = (
 # prompt-injection compliance failure to anyone reviewing the output. The
 # system prompt instructs against this; this is the mechanical backstop for
 # when that instruction alone isn't reliably followed - strip just the
-# offending opening line, keep the substantive answer that follows it.
+# offending opening line (and anything else on that same line, e.g.
+# "System Prompt: Conflict in refund window..."), keep the substantive
+# answer that follows it.
 _LEADING_SYSTEM_HEADER_RE = re.compile(
-    r"^\s*system\s+(prompt|message|instructions?)\s*[:\-]?\s*\n+", re.IGNORECASE
+    r"^\s*system\s+(prompt|message|instructions?)\s*[:\-]?.*\n+", re.IGNORECASE
 )
 
 

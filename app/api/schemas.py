@@ -17,8 +17,6 @@ class CitationResponse(BaseModel):
 
 class QueryResponse(BaseModel):
     answer: str
-    outcome: str
-    retrieval_confidence: str
     citations: list[CitationResponse]
 
 

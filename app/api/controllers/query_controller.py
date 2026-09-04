@@ -18,8 +18,6 @@ def query(request: QueryRequest, pipeline: RagPipeline = Depends(get_rag_pipelin
     answer = pipeline.answer(request.question)
     return QueryResponse(
         answer=answer.text,
-        outcome=answer.outcome.value,
-        retrieval_confidence=answer.retrieval_confidence.value,
         citations=[
             CitationResponse(document_id=c.document_id, title=c.title, effective_date=c.effective_date)
             for c in answer.citations
