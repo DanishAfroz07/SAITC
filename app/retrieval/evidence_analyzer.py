@@ -6,12 +6,27 @@ Two deliberately simple heuristics (limitations, see README):
 1. Conflict detection uses a hand-maintained registry of document pairs
    known to disagree (KNOWN_CONFLICT_PAIRS) - not automated contradiction
    detection.
-2. Ambiguity detection is a score-spread + section-diversity proxy, not
+2. Ambiguity detection is a within-document section-diversity proxy, not
    semantic reasoning about the question.
 """
+import re
 from dataclasses import dataclass
 
 from app.models import EvidenceAssessment, EvidenceOutcome, RetrievalConfidence, RetrievedChunk
+
+_TOP_LEVEL_SECTION_RE = re.compile(r"^\s*(\d+)")
+_DOCUMENT_HEADER_SECTION = "Document header"
+
+
+def _top_level_section(section: str) -> str:
+    """The leading section number, e.g. '2' from '2. File and storage
+    limits'. Section numbers are only meaningful within their own document -
+    HR-PRO-011's "1. Purpose" has nothing to do with HR-POL-002's "4.1
+    Purpose and scope" just because both start with a digit - so this is
+    only ever compared per-document, never across documents (see
+    _looks_ambiguous)."""
+    match = _TOP_LEVEL_SECTION_RE.match(section)
+    return match.group(1) if match else section
 
 KNOWN_CONFLICT_PAIRS: list[frozenset[str]] = [
     frozenset({"LEG-TRM-004", "SUP-FAQ-001"}),
@@ -22,17 +37,28 @@ class EvidenceAnalyzer:
     def __init__(
         self,
         similarity_threshold: float,
-        ambiguity_margin: float,
-        ambiguity_min_sections: int = 3,
+        ambiguity_min_sections: int = 2,
         ambiguity_window: int = 4,
+        ambiguity_max_query_words: int = 5,
         conflict_confidence_threshold: float = 0.70,
         high_confidence_score: float = 0.78,
         medium_confidence_score: float = 0.68,
     ) -> None:
         self._similarity_threshold = similarity_threshold
-        self._ambiguity_margin = ambiguity_margin
         self._ambiguity_min_sections = ambiguity_min_sections
         self._ambiguity_window = ambiguity_window
+        # Evidence-based: a document's internal section-diversity alone
+        # can't tell "genuinely different kinds of thing" (Q8: rate limit
+        # vs storage limit) apart from "different facets of one coherent
+        # topic" (Q12: FIN-POL-007's booking/accommodation/claiming-costs
+        # sections, all "travel booking rules") - both look identical in
+        # shape (same document, several distinct top-level sections). What
+        # actually differs is the QUESTION: Q8 is 4 words with no qualifying
+        # noun, Q12 is 11 words that already name exactly what's wanted. A
+        # short, underspecified question is what's actually ambiguous; a
+        # long one that already names its topics isn't, no matter how the
+        # retrieved sections are numbered. See README.md.
+        self._ambiguity_max_query_words = ambiguity_max_query_words
         # Calibrated against scores actually observed in live testing: clean,
         # correct single-topic matches (e.g. Q1, Q2) scored 0.73-0.79; weaker
         # supporting chunks in multi-document answers scored 0.65-0.72. These
@@ -49,7 +75,7 @@ class EvidenceAnalyzer:
         # nothing to do with refunds. 0.70 separates the two cleanly.
         self._conflict_confidence_threshold = conflict_confidence_threshold
 
-    def assess(self, chunks: list[RetrievedChunk]) -> EvidenceAssessment:
+    def assess(self, query: str, chunks: list[RetrievedChunk]) -> EvidenceAssessment:
         relevant = [c for c in chunks if c.score >= self._similarity_threshold]
         if not relevant:
             return EvidenceAssessment(
@@ -84,7 +110,7 @@ class EvidenceAnalyzer:
                 reason="Retrieved chunks span a document pair known to conflict.",
             )
 
-        if self._looks_ambiguous(non_superseded):
+        if self._looks_ambiguous(query, non_superseded):
             return EvidenceAssessment(
                 outcome=EvidenceOutcome.AMBIGUOUS,
                 chunks=relevant,
@@ -109,14 +135,39 @@ class EvidenceAnalyzer:
             return RetrievalConfidence.MEDIUM
         return RetrievalConfidence.LOW
 
-    def _looks_ambiguous(self, chunks: list[RetrievedChunk]) -> bool:
+    def _looks_ambiguous(self, query: str, chunks: list[RetrievedChunk]) -> bool:
+        # A question that already names what it wants (Q12: "expense
+        # approval thresholds and travel booking rules") isn't ambiguous no
+        # matter how its retrieved sections are numbered - see __init__.
+        if len(query.split()) > self._ambiguity_max_query_words:
+            return False
+
         top = chunks[: self._ambiguity_window]
         if len(top) < self._ambiguity_min_sections:
             return False
-        sections = {c.chunk.section for c in top}
-        if len(sections) < self._ambiguity_min_sections:
-            return False
-        # min/max rather than positional top[0]/top[-1]: chunks may have been
-        # reordered by a reranker, so the list isn't guaranteed sorted by score.
-        scores = [c.score for c in top]
-        return (max(scores) - min(scores)) < self._ambiguity_margin
+
+        # Grouped PER DOCUMENT on purpose (see _top_level_section docstring):
+        # Q1's supporting cross-references (HR-PRO-011, HR-POL-005 alongside
+        # the primary HR-POL-002) used to falsely count as "diverse topics"
+        # under a global section-string count, when they're really just
+        # multiple documents supporting one coherent answer. What genuinely
+        # signals ambiguity (Q8: "rate limit" vs "storage limit") is ONE
+        # document contributing several distinct top-level sections.
+        # "Document header" is excluded - it's the same boilerplate
+        # metadata block on every document, never a genuine second topic,
+        # and it was co-occurring with real content chunks from the same
+        # document often enough to falsely trigger this (assignment Q4).
+        sections_by_doc: dict[str, set[str]] = {}
+        for c in top:
+            section = _top_level_section(c.chunk.section)
+            if section == _DOCUMENT_HEADER_SECTION:
+                continue
+            sections_by_doc.setdefault(c.chunk.document_id, set()).add(section)
+        max_distinct_sections = max((len(s) for s in sections_by_doc.values()), default=0)
+        # No score-closeness check here on purpose: once a single document
+        # genuinely offers 2+ different kinds of thing (rate limit vs
+        # storage limit), a real score gap between them doesn't mean the
+        # lower-scoring one isn't a valid reading of the question - a score
+        # gap of 0.66/0.62 was enough to wrongly disqualify Q8 under the
+        # margin check this used to have. See README.md.
+        return max_distinct_sections >= self._ambiguity_min_sections

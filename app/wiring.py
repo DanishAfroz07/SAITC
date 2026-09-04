@@ -86,8 +86,8 @@ def build_rag_pipeline() -> RagPipeline:
         version_resolver=VersionResolver(manifest_entries),
         evidence_analyzer=EvidenceAnalyzer(
             similarity_threshold=settings.similarity_threshold,
-            ambiguity_margin=settings.ambiguity_margin,
             ambiguity_min_sections=settings.ambiguity_min_sections,
+            ambiguity_max_query_words=settings.ambiguity_max_query_words,
             conflict_confidence_threshold=settings.conflict_confidence_threshold,
             high_confidence_score=settings.high_confidence_score,
             medium_confidence_score=settings.medium_confidence_score,
@@ -96,4 +96,5 @@ def build_rag_pipeline() -> RagPipeline:
         generator=AnswerGenerator(chat_client=_chat_client()),
         output_guard=OutputGuard(),
         as_of_date=settings.as_of_date,
+        manifest_by_id={m.document_id: m for m in manifest_entries},
     )
